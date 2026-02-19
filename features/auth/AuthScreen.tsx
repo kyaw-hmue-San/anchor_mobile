@@ -1,55 +1,144 @@
-import React, { useState } from "react";
-import { View, Text, TextInput, Button, Alert } from "react-native";
+import React, { useEffect, useState } from "react";
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { ROUTES } from "../../main/navigation/routes";
-import { getUser, saveUser } from "../../services/storage";
-import { User } from "../../models/types";
+import { useSpace } from "../../context/SpaceContext";
 
 export function AuthScreen() {
   const navigation = useNavigation();
-  const [displayName, setDisplayName] = useState("");
-  const [partnerCode, setPartnerCode] = useState("");
+  const { session, loading, signIn, signUp, setSoloMode } = useSpace();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleContinue = async () => {
-    if (!displayName.trim()) {
-      Alert.alert("Missing name", "Please enter a display name.");
+  useEffect(() => {
+    if (session) {
+      navigation.reset({ index: 0, routes: [{ name: ROUTES.MainTabs as never }] });
+    }
+  }, [navigation, session]);
+
+  const handleSubmit = async () => {
+    if (!email.trim() || !password.trim()) {
+      setError("Email and password are required.");
       return;
     }
-    const user: User = {
-      id: "local-user",
-      displayName: displayName.trim(),
-      partnerCode: partnerCode.trim() || "partner-demo",
-    };
-    await saveUser(user);
-    navigation.navigate(ROUTES.MainTabs as never);
+    setPending(true);
+    setError(null);
+    setStatus(null);
+    const err = isSignUp
+      ? await signUp(email.trim().toLowerCase(), password)
+      : await signIn(email.trim().toLowerCase(), password);
+    if (err) {
+      setError(err.message);
+    } else {
+      setStatus(isSignUp ? "Account created. You can sign in now." : "Signed in. Redirecting…");
+      navigation.navigate(ROUTES.MainTabs as never);
+    }
+    setPending(false);
   };
 
-  const handlePrefill = async () => {
-    const existing = await getUser();
-    if (existing) {
-      setDisplayName(existing.displayName);
-      setPartnerCode(existing.partnerCode);
-    }
+  const handleSolo = async () => {
+    setPending(true);
+    setError(null);
+    setStatus("Solo mode enabled.");
+    await setSoloMode();
+    navigation.navigate(ROUTES.MainTabs as never);
+    setPending(false);
   };
 
   return (
-    <View style={{ flex: 1, padding: 24, justifyContent: "center", gap: 12 }}>
-      <Text style={{ fontSize: 24, fontWeight: "600" }}>Anchor</Text>
-      <Text style={{ fontSize: 16 }}>Private digital sanctuary for you two.</Text>
+    <View style={styles.container}>
+      <Text style={styles.title}>Anchor</Text>
+      <Text style={styles.subtitle}>Private sanctuary for two. Choose how you sign in.</Text>
+
+      <View style={styles.toggleRow}>
+        <TouchableOpacity
+          style={[styles.toggleButton, !isSignUp && styles.toggleButtonActive]}
+          onPress={() => setIsSignUp(false)}
+        >
+          <Text style={[styles.toggleText, !isSignUp && styles.toggleTextActive]}>Sign In</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.toggleButton, isSignUp && styles.toggleButtonActive]}
+          onPress={() => setIsSignUp(true)}
+        >
+          <Text style={[styles.toggleText, isSignUp && styles.toggleTextActive]}>Sign Up</Text>
+        </TouchableOpacity>
+      </View>
+
       <TextInput
-        placeholder="Your display name"
-        value={displayName}
-        onChangeText={setDisplayName}
-        style={{ borderWidth: 1, borderColor: "#ccc", padding: 10, borderRadius: 8 }}
+        placeholder="Email"
+        value={email}
+        onChangeText={setEmail}
+        style={styles.input}
+        placeholderTextColor="#6B7280"
+        keyboardType="email-address"
+        autoCapitalize="none"
       />
       <TextInput
-        placeholder="Partner code (fake pairing)"
-        value={partnerCode}
-        onChangeText={setPartnerCode}
-        style={{ borderWidth: 1, borderColor: "#ccc", padding: 10, borderRadius: 8 }}
+        placeholder="Password"
+        value={password}
+        onChangeText={setPassword}
+        style={styles.input}
+        placeholderTextColor="#6B7280"
+        secureTextEntry
       />
-      <Button title="Continue" onPress={handleContinue} />
-      <Button title="Load saved profile" onPress={handlePrefill} />
+
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {status ? <Text style={styles.status}>{status}</Text> : null}
+
+      <TouchableOpacity style={styles.primaryButton} onPress={handleSubmit} disabled={pending || loading}>
+        {pending ? <ActivityIndicator color="white" /> : <Text style={styles.primaryButtonText}>{isSignUp ? "Create account" : "Sign in"}</Text>}
+      </TouchableOpacity>
+
+      <TouchableOpacity style={styles.secondaryButton} onPress={handleSolo} disabled={pending || loading}>
+        <Text style={styles.secondaryButtonText}>Continue in solo mode</Text>
+      </TouchableOpacity>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: { flex: 1, padding: 24, justifyContent: "center", gap: 12, backgroundColor: "#F9FAFB" },
+  title: { fontSize: 28, fontWeight: "800", color: "#111827" },
+  subtitle: { fontSize: 16, color: "#4B5563", marginBottom: 8 },
+  toggleRow: { flexDirection: "row", gap: 8 },
+  toggleButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    alignItems: "center",
+  },
+  toggleButtonActive: { backgroundColor: "#EEF2FF", borderColor: "#7C3AED" },
+  toggleText: { color: "#6B7280", fontWeight: "700" },
+  toggleTextActive: { color: "#4C1D95" },
+  input: {
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 12,
+    padding: 12,
+    backgroundColor: "white",
+    color: "#111827",
+  },
+  primaryButton: {
+    backgroundColor: "#7C3AED",
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  primaryButtonText: { color: "white", fontWeight: "700" },
+  secondaryButton: {
+    backgroundColor: "#E5E7EB",
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  secondaryButtonText: { color: "#111827", fontWeight: "700" },
+  error: { color: "#B91C1C", marginTop: 4 },
+  status: { color: "#047857", marginTop: 4 },
+});

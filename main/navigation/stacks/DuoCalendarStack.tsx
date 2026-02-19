@@ -8,17 +8,9 @@ const Stack = createNativeStackNavigator();
 
 export function DuoCalendarStack() {
   return (
-    <Stack.Navigator>
-      <Stack.Screen
-        name={ROUTES.DuoCalendarHome}
-        component={DuoCalendarScreen}
-        options={{ title: "Duo-Calendar" }}
-      />
-      <Stack.Screen
-        name={ROUTES.GuardianAlert}
-        component={GuardianAlertScreen}
-        options={{ title: "Guardian Alert" }}
-      />
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name={ROUTES.DuoCalendarHome} component={DuoCalendarScreen} />
+      <Stack.Screen name={ROUTES.GuardianAlert} component={GuardianAlertScreen} />
     </Stack.Navigator>
   );
 }

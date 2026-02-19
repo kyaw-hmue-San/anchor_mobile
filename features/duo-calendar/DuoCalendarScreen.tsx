@@ -9,11 +9,17 @@ import {
   StyleSheet,
   ActivityIndicator,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
+import { AnchorLogo } from "../../components/AnchorLogo";
+import { MenuButton } from "../../components/MenuButton";
 import { Event, EventCategory } from "../../models/types";
-import { deleteEvent, listEvents, saveEvent } from "../../services/storage";
+import { deleteEvent as deleteLocalEvent, listEvents as listLocalEvents, saveEvent as saveLocalEvent } from "../../services/storage";
 import { ROUTES } from "../../main/navigation/routes";
+import { useSpace } from "../../context/SpaceContext";
+import { CoupleModeGate } from "../../components/CoupleModeGate";
+import { deleteEvent, listEvents, subscribeEvents, upsertEvent } from "../../services/supabaseRepo";
 
 const categories: EventCategory[] = ["call", "date", "gift", "trip", "other"];
 
@@ -28,21 +34,36 @@ const emptyEvent = (): Event => ({
 
 export function DuoCalendarScreen() {
   const navigation = useNavigation();
+  const { mode, activeSpaceId, userId } = useSpace();
+  const isCoupleActive = useMemo(() => mode === "couple" && !!activeSpaceId && !!userId, [activeSpaceId, mode, userId]);
   const [events, setEvents] = useState<Event[]>([]);
   const [form, setForm] = useState<Event>(emptyEvent());
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const loadEvents = async () => {
     setLoading(true);
-    const list = await listEvents();
-    setEvents(list);
-    setLoading(false);
+    setError(null);
+    try {
+      if (isCoupleActive && activeSpaceId) {
+        const { events: remoteEvents, error: remoteError } = await listEvents(activeSpaceId);
+        if (remoteError) throw remoteError;
+        setEvents(remoteEvents);
+      } else {
+        const list = await listLocalEvents();
+        setEvents(list);
+      }
+    } catch {
+      setError("Could not load events.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
     loadEvents().finally(() => setInitialLoading(false));
-  }, []);
+  }, [activeSpaceId, isCoupleActive]);
 
   const onSubmit = async () => {
     if (!form.title.trim()) {
@@ -50,16 +71,39 @@ export function DuoCalendarScreen() {
       return;
     }
     setLoading(true);
-    await saveEvent(form);
-    setForm(emptyEvent());
-    await loadEvents();
+    setError(null);
+    try {
+      if (isCoupleActive && activeSpaceId && userId) {
+        const { error: remoteError } = await upsertEvent(activeSpaceId, userId, form);
+        if (remoteError) throw remoteError;
+      } else {
+        await saveLocalEvent(form);
+      }
+      setForm(emptyEvent());
+      await loadEvents();
+    } catch {
+      setError("Could not save event.");
+      setLoading(false);
+    }
   };
 
   const onEdit = (event: Event) => setForm(event);
 
   const onDelete = async (id: string) => {
-    await deleteEvent(id);
-    await loadEvents();
+    setLoading(true);
+    setError(null);
+    try {
+      if (isCoupleActive && activeSpaceId) {
+        const { error: remoteError } = await deleteEvent(activeSpaceId, id);
+        if (remoteError) throw remoteError;
+      } else {
+        await deleteLocalEvent(id);
+      }
+      await loadEvents();
+    } catch {
+      setError("Could not delete event.");
+      setLoading(false);
+    }
   };
 
   const toggleGuardian = () => setForm(prev => ({ ...prev, guardianAlertEnabled: !prev.guardianAlertEnabled }));
@@ -69,138 +113,161 @@ export function DuoCalendarScreen() {
     [events]
   );
 
+  useEffect(() => {
+    if (!isCoupleActive || !activeSpaceId) return;
+    const unsubscribe = subscribeEvents(activeSpaceId, event => {
+      setEvents(prev => {
+        const others = prev.filter(e => e.id !== event.id);
+        return [...others, event];
+      });
+    });
+    return () => unsubscribe();
+  }, [activeSpaceId, isCoupleActive]);
+
   if (initialLoading) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator />
-        <Text style={styles.muted}>Loading calendar…</Text>
-      </View>
+      <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
+        <View style={styles.centered}>
+          <ActivityIndicator size="small" color={palette.primary} />
+        </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <View style={styles.headerBlock}>
-        <Text style={styles.screenTitle}>Duo-Calendar</Text>
-        <Text style={styles.muted}>Shared moments & memories</Text>
-      </View>
-
-      <TouchableOpacity
-        style={styles.alertBanner}
-        onPress={() => navigation.navigate(ROUTES.GuardianAlert as never)}
-      >
-        <Ionicons name="alert" size={22} color="white" />
-        <Text style={styles.alertBannerText}>Guardian Alert</Text>
-        <Ionicons name="flame" size={22} color="white" />
-      </TouchableOpacity>
-      <Text style={[styles.muted, { textAlign: "center", marginTop: 6 }]}>Tap if you need immediate help or support</Text>
-
-      <View style={styles.card}>
-        <View style={styles.cardHeaderRow}>
-          <View>
-            <Text style={styles.cardTitle}>Add / Edit Event</Text>
-            <Text style={styles.muted}>Title, time, category, note</Text>
+    <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
+      <CoupleModeGate>
+        <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+          <View style={styles.topBar}>
+            <AnchorLogo size={35} />
+            <MenuButton color={palette.text} />
           </View>
-          <TouchableOpacity onPress={() => setForm(emptyEvent())}>
-            <Ionicons name="add-circle-outline" size={24} color={palette.primary} />
+
+          <View style={styles.headerBlock}>
+            <Text style={styles.screenTitle}>Duo-Calendar</Text>
+            <Text style={styles.muted}>Shared moments & memories</Text>
+          </View>
+
+          {error ? <Text style={[styles.muted, { color: "#B91C1C" }]}>{error}</Text> : null}
+
+          <TouchableOpacity
+            style={styles.alertBanner}
+            onPress={() => navigation.navigate(ROUTES.GuardianAlert as never)}
+          >
+            <Ionicons name="alert" size={22} color="white" />
+            <Text style={styles.alertBannerText}>Guardian Alert</Text>
+            <Ionicons name="flame" size={22} color="white" />
           </TouchableOpacity>
-        </View>
+          <Text style={[styles.muted, { textAlign: "center", marginTop: 6 }]}>Tap if you need immediate help or support</Text>
 
-        <TextInput
-          placeholder="Title"
-          value={form.title}
-          onChangeText={text => setForm({ ...form, title: text })}
-          style={styles.input}
-          placeholderTextColor={palette.muted}
-        />
-        <TextInput
-          placeholder="ISO datetime (e.g., 2026-02-12T18:00:00Z)"
-          value={form.dateTime}
-          onChangeText={text => setForm({ ...form, dateTime: text })}
-          style={styles.input}
-          placeholderTextColor={palette.muted}
-        />
-        <TextInput
-          placeholder="Note"
-          value={form.note}
-          onChangeText={text => setForm({ ...form, note: text })}
-          style={[styles.input, { minHeight: 80 }]}
-          placeholderTextColor={palette.muted}
-          multiline
-        />
+          <View style={styles.card}>
+            <View style={styles.cardHeaderRow}>
+              <View>
+                <Text style={styles.cardTitle}>Add / Edit Event</Text>
+                <Text style={styles.muted}>Title, time, category, note</Text>
+              </View>
+              <TouchableOpacity onPress={() => setForm(emptyEvent())}>
+                <Ionicons name="add-circle-outline" size={24} color={palette.primary} />
+              </TouchableOpacity>
+            </View>
 
-        <View style={styles.chipRow}>
-          {categories.map(cat => (
-            <TouchableOpacity
-              key={cat}
-              onPress={() => setForm({ ...form, category: cat })}
-              style={[
-                styles.chip,
-                form.category === cat && { backgroundColor: palette.primarySoft, borderColor: palette.primary },
-              ]}
-            >
-              <Text style={styles.chipText}>{cat}</Text>
+            <TextInput
+              placeholder="Title"
+              value={form.title}
+              onChangeText={text => setForm({ ...form, title: text })}
+              style={styles.input}
+              placeholderTextColor={palette.muted}
+            />
+            <TextInput
+              placeholder="ISO datetime (e.g., 2026-02-12T18:00:00Z)"
+              value={form.dateTime}
+              onChangeText={text => setForm({ ...form, dateTime: text })}
+              style={styles.input}
+              placeholderTextColor={palette.muted}
+            />
+            <TextInput
+              placeholder="Note"
+              value={form.note}
+              onChangeText={text => setForm({ ...form, note: text })}
+              style={[styles.input, { minHeight: 80 }]}
+              placeholderTextColor={palette.muted}
+              multiline
+            />
+
+            <View style={styles.chipRow}>
+              {categories.map(cat => (
+                <TouchableOpacity
+                  key={cat}
+                  onPress={() => setForm({ ...form, category: cat })}
+                  style={[
+                    styles.chip,
+                    form.category === cat && { backgroundColor: palette.primarySoft, borderColor: palette.primary },
+                  ]}
+                >
+                  <Text style={styles.chipText}>{cat}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <TouchableOpacity style={styles.toggleButton} onPress={toggleGuardian}>
+              <Ionicons
+                name={form.guardianAlertEnabled ? "shield-checkmark" : "shield-outline"}
+                size={18}
+                color={form.guardianAlertEnabled ? palette.primary : palette.muted}
+              />
+              <Text style={[styles.toggleText, form.guardianAlertEnabled && { color: palette.primary }]}>
+                Guardian Alert {form.guardianAlertEnabled ? "ON" : "OFF"}
+              </Text>
             </TouchableOpacity>
-          ))}
-        </View>
 
-        <TouchableOpacity style={styles.toggleButton} onPress={toggleGuardian}>
-          <Ionicons
-            name={form.guardianAlertEnabled ? "shield-checkmark" : "shield-outline"}
-            size={18}
-            color={form.guardianAlertEnabled ? palette.primary : palette.muted}
-          />
-          <Text style={[styles.toggleText, form.guardianAlertEnabled && { color: palette.primary }]}> 
-            Guardian Alert {form.guardianAlertEnabled ? "ON" : "OFF"}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.primaryButton} onPress={onSubmit} disabled={loading}>
-          <Text style={styles.primaryButtonText}>{loading ? "Saving…" : "Save Event"}</Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.upcomingHeaderRow}>
-        <Text style={styles.upcomingTitle}>Upcoming Events</Text>
-        <TouchableOpacity style={styles.addCircle} onPress={() => setForm(emptyEvent())}>
-          <Ionicons name="add" size={20} color="white" />
-        </TouchableOpacity>
-      </View>
-
-      {sortedEvents.length === 0 ? (
-        <Text style={[styles.muted, { marginBottom: 16 }]}>No events yet.</Text>
-      ) : (
-        sortedEvents.map(item => (
-          <View key={item.id} style={styles.eventCard}>
-            <View style={styles.eventHeader}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.eventTitle}>{item.title}</Text>
-                <View style={styles.eventMetaRow}>
-                  <Ionicons name="calendar-outline" size={14} color={palette.muted} />
-                  <Text style={styles.eventMetaText}>{new Date(item.dateTime).toLocaleString()}</Text>
-                </View>
-                <Text style={styles.eventMetaText}>{item.note || "No note"}</Text>
-                <Text style={[styles.eventMetaText, { marginTop: 4, color: item.guardianAlertEnabled ? palette.primary : palette.muted }]}>
-                  Guardian Alert: {item.guardianAlertEnabled ? "Enabled" : "Disabled"}
-                </Text>
-                <Text style={[styles.eventMetaText, { marginTop: 4 }]}>Shared with partner</Text>
-              </View>
-              <View style={styles.heartBadge}>
-                <Ionicons name="heart-outline" size={18} color={palette.primary} />
-              </View>
-            </View>
-            <View style={styles.eventActionRow}>
-              <TouchableOpacity style={styles.secondaryButton} onPress={() => onEdit(item)}>
-                <Text style={styles.secondaryButtonText}>Edit</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.dangerButton} onPress={() => onDelete(item.id)}>
-                <Text style={styles.dangerButtonText}>Delete</Text>
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity style={styles.primaryButton} onPress={onSubmit} disabled={loading}>
+              <Text style={styles.primaryButtonText}>{loading ? "Saving…" : "Save Event"}</Text>
+            </TouchableOpacity>
           </View>
-        ))
-      )}
-    </ScrollView>
+
+          <View style={styles.upcomingHeaderRow}>
+            <Text style={styles.upcomingTitle}>Upcoming Events</Text>
+            <TouchableOpacity style={styles.addCircle} onPress={() => setForm(emptyEvent())}>
+              <Ionicons name="add" size={20} color="white" />
+            </TouchableOpacity>
+          </View>
+
+          {sortedEvents.length === 0 ? (
+            <Text style={[styles.muted, { marginBottom: 16 }]}>No events yet.</Text>
+          ) : (
+            sortedEvents.map(item => (
+              <View key={item.id} style={styles.eventCard}>
+                <View style={styles.eventHeader}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.eventTitle}>{item.title}</Text>
+                    <View style={styles.eventMetaRow}>
+                      <Ionicons name="calendar-outline" size={14} color={palette.muted} />
+                      <Text style={styles.eventMetaText}>{new Date(item.dateTime).toLocaleString()}</Text>
+                    </View>
+                    <Text style={styles.eventMetaText}>{item.note || "No note"}</Text>
+                    <Text style={[styles.eventMetaText, { marginTop: 4, color: item.guardianAlertEnabled ? palette.primary : palette.muted }]}>
+                      Guardian Alert: {item.guardianAlertEnabled ? "Enabled" : "Disabled"}
+                    </Text>
+                    <Text style={[styles.eventMetaText, { marginTop: 4 }]}>Shared with partner</Text>
+                  </View>
+                  <View style={styles.heartBadge}>
+                    <Ionicons name="heart-outline" size={18} color={palette.primary} />
+                  </View>
+                </View>
+                <View style={styles.eventActionRow}>
+                  <TouchableOpacity style={styles.secondaryButton} onPress={() => onEdit(item)}>
+                    <Text style={styles.secondaryButtonText}>Edit</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.dangerButton} onPress={() => onDelete(item.id)}>
+                    <Text style={styles.dangerButtonText}>Delete</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))
+          )}
+        </ScrollView>
+      </CoupleModeGate>
+    </SafeAreaView>
   );
 }
 
@@ -216,10 +283,13 @@ const palette = {
 };
 
 const styles = StyleSheet.create({
+  safeArea: { flex: 1, backgroundColor: palette.background },
   screen: { flex: 1, backgroundColor: palette.background },
   content: { padding: 16, gap: 16, paddingBottom: 32 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center" },
   muted: { color: palette.muted },
+  topBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  brand: { fontSize: 18, fontWeight: "700", color: palette.text },
   headerBlock: { gap: 4 },
   screenTitle: { fontSize: 26, fontWeight: "800", color: palette.text },
   alertBanner: {

@@ -3,7 +3,6 @@ import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { SanctuaryScreen } from "../../features/sanctuary/SanctuaryScreen";
 import { DuoCalendarStack } from "./stacks/DuoCalendarStack";
 import { VaultScreen } from "../../features/vault/VaultScreen";
-import { SettingsScreen } from "../../features/settings/SettingsScreen";
 import { ROUTES } from "./routes";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -14,7 +13,7 @@ export function MainTabs() {
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
-        tabBarActiveTintColor: "#5B6EF5",
+        tabBarActiveTintColor: "#7C3AED",
         tabBarInactiveTintColor: "#6B7280",
         tabBarStyle: { paddingBottom: 6, paddingTop: 6, height: 64 },
         tabBarIcon: ({ color, size }) => {
@@ -23,9 +22,7 @@ export function MainTabs() {
               ? "home-outline"
               : route.name === ROUTES.DuoCalendar
               ? "calendar-outline"
-              : route.name === ROUTES.Vault
-              ? "albums-outline"
-              : "settings-outline";
+              : "albums-outline";
           return <Ionicons name={name as any} size={size} color={color} />;
         },
       })}
@@ -33,7 +30,6 @@ export function MainTabs() {
       <Tab.Screen name={ROUTES.Sanctuary} component={SanctuaryScreen} />
       <Tab.Screen name={ROUTES.DuoCalendar} component={DuoCalendarStack} />
       <Tab.Screen name={ROUTES.Vault} component={VaultScreen} />
-      <Tab.Screen name={ROUTES.Settings} component={SettingsScreen} />
     </Tab.Navigator>
   );
 }

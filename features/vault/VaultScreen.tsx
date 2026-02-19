@@ -1,32 +1,73 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { View, Text, Image, TextInput, TouchableOpacity, StyleSheet, ScrollView } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { AnchorLogo } from "../../components/AnchorLogo";
+import { MenuButton } from "../../components/MenuButton";
 import { Memory, Snapshot } from "../../models/types";
 import { addMemoryFromSnapshot, addNoteMemory, getTodaySnapshot, listMemories } from "../../services/storage";
+import { useSpace } from "../../context/SpaceContext";
+import { CoupleModeGate } from "../../components/CoupleModeGate";
+import { listSnapshots, SnapshotRow } from "../../services/supabaseRepo";
+
+const toMemoryFromSnapshot = (row: SnapshotRow): Memory => ({
+  id: row.id,
+  title: "Snapshot",
+  description: "Shared snapshot",
+  createdAt: new Date(row.created_at).getTime(),
+  type: "snapshot",
+  snapshotUri: row.uri,
+});
+
+const toSnapshot = (row: SnapshotRow): Snapshot => ({
+  id: row.id,
+  uri: row.uri,
+  createdAt: new Date(row.created_at).getTime(),
+});
 
 export function VaultScreen() {
+  const { mode, activeSpaceId, userId } = useSpace();
+  const isCoupleActive = useMemo(() => mode === "couple" && !!activeSpaceId, [activeSpaceId, mode]);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [noteTitle, setNoteTitle] = useState("");
   const [noteDesc, setNoteDesc] = useState("");
   const [todaySnap, setTodaySnap] = useState<Snapshot | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
-    const [mems, snap] = await Promise.all([listMemories(), getTodaySnapshot()]);
-    setMemories(mems);
-    setTodaySnap(snap);
+    setError(null);
+    try {
+      if (isCoupleActive && activeSpaceId) {
+        const { snapshots, error: snapError } = await listSnapshots(activeSpaceId);
+        if (snapError) throw snapError;
+        setMemories(snapshots.map(toMemoryFromSnapshot));
+        const today = new Date().toISOString().slice(0, 10);
+        const todaysSnapshot = snapshots.find(row => row.created_at.slice(0, 10) === today && (!userId || row.user_id === userId))
+          ?? snapshots.find(row => row.created_at.slice(0, 10) === today);
+        setTodaySnap(todaysSnapshot ? toSnapshot(todaysSnapshot) : null);
+      } else {
+        const [mems, snap] = await Promise.all([listMemories(), getTodaySnapshot()]);
+        setMemories(mems);
+        setTodaySnap(snap);
+      }
+    } catch {
+      setError("Could not load Vault data.");
+    }
   };
 
   useEffect(() => {
     load();
-  }, []);
+  }, [activeSpaceId, isCoupleActive, userId]);
 
   const addSnapshotMemory = async () => {
+    if (isCoupleActive) return;
     if (!todaySnap) return;
     await addMemoryFromSnapshot(todaySnap);
     await load();
   };
 
   const addNote = async () => {
+    if (isCoupleActive) return;
     if (!noteTitle.trim()) return;
     await addNoteMemory(noteTitle.trim(), noteDesc.trim());
     setNoteTitle("");
@@ -35,74 +76,98 @@ export function VaultScreen() {
   };
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <View style={styles.headerBlock}>
-        <Text style={styles.screenTitle}>The Vault</Text>
-        <Text style={styles.muted}>Treasured moments & love letters</Text>
-      </View>
-
-      <View style={styles.banner}>
-        <View style={styles.bannerRow}>
-          <Ionicons name="cloud-download-outline" size={18} color={palette.text} />
-          <Text style={styles.bannerTitle}>Available Offline</Text>
-        </View>
-        <Text style={styles.bannerSubtitle}>All memories are cached and accessible even without internet</Text>
-      </View>
-
-      <View style={styles.card}>
-        <View style={styles.cardHeaderRow}>
-          <Text style={styles.cardTitle}>Add note memory</Text>
-          <Ionicons name="create-outline" size={20} color={palette.primary} />
-        </View>
-        <TextInput
-          placeholder="Title"
-          value={noteTitle}
-          onChangeText={setNoteTitle}
-          style={styles.input}
-          placeholderTextColor={palette.muted}
-        />
-        <TextInput
-          placeholder="Description"
-          value={noteDesc}
-          onChangeText={setNoteDesc}
-          style={[styles.input, { minHeight: 90 }]}
-          placeholderTextColor={palette.muted}
-          multiline
-        />
-        <TouchableOpacity style={styles.primaryButton} onPress={addNote}>
-          <Text style={styles.primaryButtonText}>Save note to Vault</Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.card}>
-        <View style={styles.cardHeaderRow}>
-          <Text style={styles.cardTitle}>Today’s snapshot</Text>
-          <Ionicons name="image-outline" size={20} color={palette.primary} />
-        </View>
-        {todaySnap ? (
-          <>
-            <Image source={{ uri: todaySnap.uri }} style={styles.snapshot} resizeMode="cover" />
-            <TouchableOpacity style={styles.primaryButton} onPress={addSnapshotMemory}>
-              <Text style={styles.primaryButtonText}>Save snapshot to Vault</Text>
-            </TouchableOpacity>
-          </>
-        ) : (
-          <Text style={styles.muted}>No snapshot today to save.</Text>
-        )}
-      </View>
-
-      <View style={{ gap: 12 }}>
-        {memories.length === 0 ? (
-          <View style={styles.card}>
-            <Text style={styles.muted}>No memories yet.</Text>
+    <SafeAreaView style={styles.safeArea} edges={["top","left","right"]}>
+      <CoupleModeGate>
+        <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+          <View style={styles.topBar}>
+            <AnchorLogo size={35} />
+            <MenuButton color={palette.text} />
           </View>
-        ) : (
-          memories.map(item => (
-            <MemoryCard key={item.id} memory={item} />
-          ))
-        )}
-      </View>
-    </ScrollView>
+
+          <View style={styles.headerBlock}>
+            <Text style={styles.screenTitle}>The Vault</Text>
+            <Text style={styles.muted}>Treasured moments & love letters</Text>
+          </View>
+
+          {error ? <Text style={[styles.muted, { color: "#B91C1C" }]}>{error}</Text> : null}
+
+          <View style={styles.banner}>
+            <View style={styles.bannerRow}>
+              <Ionicons name="cloud-download-outline" size={18} color={palette.text} />
+              <Text style={styles.bannerTitle}>{isCoupleActive ? "Synced with Supabase" : "Available Offline"}</Text>
+            </View>
+            <Text style={styles.bannerSubtitle}>
+              {isCoupleActive ? "Shared snapshots for this space are pulled from Supabase." : "All memories are cached and accessible even without internet."}
+            </Text>
+          </View>
+
+          {isCoupleActive ? (
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Notes are local-only</Text>
+              <Text style={styles.muted}>Switch to solo mode if you want to keep private notes on this device.</Text>
+            </View>
+          ) : (
+            <View style={styles.card}>
+              <View style={styles.cardHeaderRow}>
+                <Text style={styles.cardTitle}>Add note memory</Text>
+                <Ionicons name="create-outline" size={20} color={palette.primary} />
+              </View>
+              <TextInput
+                placeholder="Title"
+                value={noteTitle}
+                onChangeText={setNoteTitle}
+                style={styles.input}
+                placeholderTextColor={palette.muted}
+              />
+              <TextInput
+                placeholder="Description"
+                value={noteDesc}
+                onChangeText={setNoteDesc}
+                style={[styles.input, { minHeight: 90 }]}
+                placeholderTextColor={palette.muted}
+                multiline
+              />
+              <TouchableOpacity style={styles.primaryButton} onPress={addNote}>
+                <Text style={styles.primaryButtonText}>Save note to Vault</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          <View style={styles.card}>
+            <View style={styles.cardHeaderRow}>
+              <Text style={styles.cardTitle}>Today’s snapshot</Text>
+              <Ionicons name="image-outline" size={20} color={palette.primary} />
+            </View>
+            {todaySnap ? (
+              <>
+                <Image source={{ uri: todaySnap.uri }} style={styles.snapshot} resizeMode="cover" />
+                {!isCoupleActive ? (
+                  <TouchableOpacity style={styles.primaryButton} onPress={addSnapshotMemory}>
+                    <Text style={styles.primaryButtonText}>Save snapshot to Vault</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <Text style={styles.muted}>Snapshots are already saved to your shared space.</Text>
+                )}
+              </>
+            ) : (
+              <Text style={styles.muted}>No snapshot today to save.</Text>
+            )}
+          </View>
+
+          <View style={{ gap: 12 }}>
+            {memories.length === 0 ? (
+              <View style={styles.card}>
+                <Text style={styles.muted}>No memories yet.</Text>
+              </View>
+            ) : (
+              memories.map(item => (
+                <MemoryCard key={item.id} memory={item} />
+              ))
+            )}
+          </View>
+        </ScrollView>
+      </CoupleModeGate>
+    </SafeAreaView>
   );
 }
 
@@ -154,9 +219,12 @@ const palette = {
 };
 
 const styles = StyleSheet.create({
+  safeArea: { flex: 1, backgroundColor: palette.background },
   screen: { flex: 1, backgroundColor: palette.background },
   content: { padding: 16, gap: 16, paddingBottom: 32 },
   muted: { color: palette.muted },
+  topBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  brand: { fontSize: 18, fontWeight: "700", color: palette.text },
   headerBlock: { gap: 4 },
   screenTitle: { fontSize: 26, fontWeight: "800", color: palette.text },
   banner: {
