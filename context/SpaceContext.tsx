@@ -1,24 +1,17 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Session } from "@supabase/supabase-js";
-import { supabase } from "../services/supabaseClient";
-import {
-  createSpace as createSpaceRepo,
-  joinSpaceWithCode as joinSpaceWithCodeRepo,
-  generatePairingCode,
-  signInWithPassword,
-  signUpWithEmail,
-  signOut as supabaseSignOut,
-} from "../services/supabaseRepo";
 
 const MODE_KEY = "anchor:mode";
 const SPACE_KEY = "anchor:space";
+const SESSION_KEY = "anchor:session";
 
 type SpaceMode = "solo" | "couple";
+type MockSession = { user: { id: string; email: string } };
+type PairingCode = { code: string; spaceId: string; expiresAt: number; used: boolean };
 
 interface SpaceContextValue {
   loading: boolean;
-  session: Session | null;
+  session: MockSession | null;
   userId: string | null;
   mode: SpaceMode;
   activeSpaceId: string | null;
@@ -34,9 +27,10 @@ interface SpaceContextValue {
 const SpaceContext = createContext<SpaceContextValue | undefined>(undefined);
 
 export function SpaceProvider({ children }: { children: React.ReactNode }) {
-  const [session, setSession] = useState<Session | null>(null);
+  const [session, setSession] = useState<MockSession | null>(null);
   const [mode, setMode] = useState<SpaceMode>("solo");
   const [activeSpaceId, setActiveSpaceId] = useState<string | null>(null);
+  const [pairingCodes, setPairingCodes] = useState<PairingCode[]>([]);
   const [loading, setLoading] = useState(true);
 
   const userId = session?.user?.id ?? null;
@@ -52,20 +46,19 @@ export function SpaceProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const init = async () => {
-      const { data } = await supabase.auth.getSession();
-      setSession(data.session);
-      const [[, storedMode], [, storedSpace]] = await AsyncStorage.multiGet([MODE_KEY, SPACE_KEY]);
+      const [[, storedMode], [, storedSpace], [, storedSession]] = await AsyncStorage.multiGet([MODE_KEY, SPACE_KEY, SESSION_KEY]);
       setMode((storedMode as SpaceMode) || "solo");
       setActiveSpaceId(storedSpace || null);
+      if (storedSession) {
+        try {
+          setSession(JSON.parse(storedSession) as MockSession);
+        } catch {
+          setSession(null);
+        }
+      }
       setLoading(false);
     };
     init();
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      setSession(newSession);
-    });
-    return () => {
-      sub?.subscription.unsubscribe();
-    };
   }, []);
 
   const setSoloMode = useCallback(async () => {
@@ -73,27 +66,32 @@ export function SpaceProvider({ children }: { children: React.ReactNode }) {
   }, [persist]);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    const { error } = await signInWithPassword(email, password);
-    return error ?? null;
+    if (!email.trim() || !password.trim()) return new Error("Email and password are required");
+    const nextSession: MockSession = {
+      user: { id: `user-${Date.now()}`, email: email.trim().toLowerCase() },
+    };
+    setSession(nextSession);
+    await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(nextSession));
+    return null;
   }, []);
 
   const signUp = useCallback(async (email: string, password: string) => {
-    const { error } = await signUpWithEmail(email, password);
-    return error ?? null;
+    if (!email.trim() || !password.trim()) return new Error("Email and password are required");
+    return null;
   }, []);
 
   const signOut = useCallback(async () => {
-    await supabaseSignOut();
+    setSession(null);
+    await AsyncStorage.removeItem(SESSION_KEY);
     await persist("solo", null);
   }, [persist]);
 
   const createSpace = useCallback(
     async (name: string) => {
       if (!userId) return { error: new Error("Not signed in") };
-      const { space, error } = await createSpaceRepo(name, userId);
-      if (error || !space) return { error };
-      await persist("couple", space.id);
-      return { spaceId: space.id };
+      const spaceId = `space-${Date.now()}`;
+      await persist("couple", spaceId);
+      return { spaceId };
     },
     [persist, userId]
   );
@@ -101,17 +99,26 @@ export function SpaceProvider({ children }: { children: React.ReactNode }) {
   const joinWithCode = useCallback(
     async (code: string) => {
       if (!userId) return { error: new Error("Not signed in") };
-      const { spaceId, error } = await joinSpaceWithCodeRepo(code, userId);
-      if (error || !spaceId) return { error };
-      await persist("couple", spaceId);
-      return { spaceId };
+      const found = pairingCodes.find(item => item.code === code && !item.used && item.expiresAt > Date.now());
+      if (!found) return { error: new Error("Invalid or expired pairing code") };
+      setPairingCodes(prev => prev.map(item => (item.code === code ? { ...item, used: true } : item)));
+      await persist("couple", found.spaceId);
+      return { spaceId: found.spaceId };
     },
-    [persist, userId]
+    [pairingCodes, persist, userId]
   );
 
   const generateCode = useCallback(async (spaceId: string, ttlMinutes = 15) => {
-    const { code, error } = await generatePairingCode(spaceId, ttlMinutes);
-    return { code, error };
+    if (!spaceId) return { error: new Error("No active space") };
+    const code = Math.random().toString(36).slice(2, 8).toUpperCase();
+    const next: PairingCode = {
+      code,
+      spaceId,
+      expiresAt: Date.now() + ttlMinutes * 60_000,
+      used: false,
+    };
+    setPairingCodes(prev => [next, ...prev].slice(0, 20));
+    return { code, error: null };
   }, []);
 
   const value: SpaceContextValue = {

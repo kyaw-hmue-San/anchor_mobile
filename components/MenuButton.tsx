@@ -2,6 +2,7 @@ import React from "react";
 import { TouchableOpacity } from "react-native";
 import { DrawerActions, NavigationProp, useNavigation } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
+import { ROUTES } from "../main/navigation/routes";
 
 export function MenuButton({ color = "#111827" }: { color?: string }) {
   const navigation = useNavigation<NavigationProp<Record<string, object | undefined>>>();
@@ -15,7 +16,6 @@ export function MenuButton({ color = "#111827" }: { color?: string }) {
 
     let drawerNav: NavigationProp<Record<string, object | undefined>> | undefined = target;
     while (drawerNav) {
-      // @ts-expect-error: openDrawer exists on drawer navigator
       if (typeof (drawerNav as any).openDrawer === "function") break;
       drawerNav = (drawerNav as any).getParent?.();
     }
@@ -23,7 +23,7 @@ export function MenuButton({ color = "#111827" }: { color?: string }) {
     if (drawerNav) {
       drawerNav.dispatch(DrawerActions.openDrawer());
     } else {
-      console.warn("Drawer navigator not found for MenuButton");
+      navigation.navigate(ROUTES.Settings as never);
     }
   };
 

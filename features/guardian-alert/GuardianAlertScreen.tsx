@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { View, Text, ActivityIndicator, StyleSheet, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -6,13 +6,8 @@ import { AnchorLogo } from "../../components/AnchorLogo";
 import { MenuButton } from "../../components/MenuButton";
 import { Event } from "../../models/types";
 import { eventsWithinNext24h } from "../../services/storage";
-import { useSpace } from "../../context/SpaceContext";
-import { CoupleModeGate } from "../../components/CoupleModeGate";
-import { listEvents, subscribeEvents } from "../../services/supabaseRepo";
 
 export function GuardianAlertScreen() {
-  const { mode, activeSpaceId } = useSpace();
-  const isCoupleActive = useMemo(() => mode === "couple" && !!activeSpaceId, [activeSpaceId, mode]);
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -30,14 +25,8 @@ export function GuardianAlertScreen() {
       setLoading(true);
       setError(null);
       try {
-        if (isCoupleActive && activeSpaceId) {
-          const { events: remoteEvents, error: remoteError } = await listEvents(activeSpaceId);
-          if (remoteError) throw remoteError;
-          setEvents(remoteEvents.filter(withinNextDay));
-        } else {
-          const upcoming = await eventsWithinNext24h();
-          setEvents(upcoming);
-        }
+        const upcoming = await eventsWithinNext24h();
+        setEvents(upcoming.filter(withinNextDay));
       } catch {
         setError("Could not load alerts.");
       } finally {
@@ -45,18 +34,7 @@ export function GuardianAlertScreen() {
       }
     };
     load();
-  }, [activeSpaceId, isCoupleActive]);
-
-  useEffect(() => {
-    if (!isCoupleActive || !activeSpaceId) return;
-    const unsubscribe = subscribeEvents(activeSpaceId, event => {
-      setEvents(prev => {
-        const merged = [...prev.filter(e => e.id !== event.id), event];
-        return merged.filter(withinNextDay);
-      });
-    });
-    return () => unsubscribe();
-  }, [activeSpaceId, isCoupleActive]);
+  }, []);
 
   if (loading) {
     return (
@@ -69,8 +47,7 @@ export function GuardianAlertScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top","left","right"]}>
-      <CoupleModeGate>
-        <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
           <View style={styles.topBar}>
             <AnchorLogo size={35} />
             <MenuButton color={palette.text} />
@@ -107,7 +84,6 @@ export function GuardianAlertScreen() {
             ))
           )}
         </ScrollView>
-      </CoupleModeGate>
     </SafeAreaView>
   );
 }

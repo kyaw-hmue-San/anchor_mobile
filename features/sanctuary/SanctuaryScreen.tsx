@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -17,27 +17,11 @@ import { MenuButton } from "../../components/MenuButton";
 import { MoodEntry, MoodOption, Snapshot } from "../../models/types";
 import { ensurePartnerMood, getMood, getTodaySnapshot, saveSnapshot, setMood } from "../../services/storage";
 import { CoupleModeGate } from "../../components/CoupleModeGate";
-import { useSpace } from "../../context/SpaceContext";
-import { listMoods, listSnapshots, MoodRow, postMood, SnapshotRow, subscribeMoods, uploadSnapshot } from "../../services/supabaseRepo";
+const PLACEHOLDER_IMAGE = "https://placehold.co/600x400";
 
 const MOODS: MoodOption[] = ["joyful", "calm", "neutral", "anxious", "low"];
 
-const toMoodEntry = (row: MoodRow, isPartner = false): MoodEntry => ({
-  date: row.created_at.slice(0, 10),
-  mood: row.mood,
-  isPartner,
-  updatedAt: new Date(row.created_at).getTime(),
-});
-
-const toSnapshot = (row: SnapshotRow): Snapshot => ({
-  id: row.id,
-  uri: row.uri,
-  createdAt: new Date(row.created_at).getTime(),
-});
-
 export function SanctuaryScreen() {
-  const { mode, activeSpaceId, userId } = useSpace();
-  const isCoupleActive = useMemo(() => mode === "couple" && !!activeSpaceId && !!userId, [activeSpaceId, mode, userId]);
   const [loading, setLoading] = useState(true);
   const [myMood, setMyMood] = useState<MoodEntry | null>(null);
   const [partnerMood, setPartnerMoodState] = useState<MoodEntry | null>(null);
@@ -49,79 +33,34 @@ export function SanctuaryScreen() {
 
   useEffect(() => {
     let isMounted = true;
-
-    const loadSolo = async () => {
-      const [mine, partner, snap] = await Promise.all([getMood(), ensurePartnerMood(), getTodaySnapshot()]);
-      if (!isMounted) return;
-      setMyMood(mine);
-      setPartnerMoodState(partner);
-      setSnapshot(snap);
-    };
-
-    const loadCouple = async () => {
-      if (!activeSpaceId || !userId) return;
-      const [{ moods, error: moodsError }, { snapshots, error: snapsError }] = await Promise.all([
-        listMoods(activeSpaceId),
-        listSnapshots(activeSpaceId),
-      ]);
-      if (moodsError) throw moodsError;
-      if (snapsError) throw snapsError;
-      if (!isMounted) return;
-      const myRow = moods.find(row => row.user_id === userId) ?? null;
-      const partnerRow = moods.find(row => row.user_id !== userId) ?? null;
-      setMyMood(myRow ? toMoodEntry(myRow) : null);
-      setPartnerMoodState(partnerRow ? toMoodEntry(partnerRow, true) : null);
-      const latestSnapshot = snapshots[0];
-      setSnapshot(latestSnapshot ? toSnapshot(latestSnapshot) : null);
-    };
-
     const load = async () => {
       setLoading(true);
       setError(null);
       try {
-        if (isCoupleActive) {
-          await loadCouple();
-        } else {
-          await loadSolo();
-        }
-      } catch (err) {
+        const [mine, partner, snap] = await Promise.all([getMood(), ensurePartnerMood(), getTodaySnapshot()]);
+        if (!isMounted) return;
+        setMyMood(mine);
+        setPartnerMoodState(partner);
+        setSnapshot(snap);
+      } catch {
         setError("Failed to load sanctuary state.");
       } finally {
         if (isMounted) setLoading(false);
       }
     };
-
     load();
     return () => {
       isMounted = false;
     };
-  }, [activeSpaceId, isCoupleActive, userId]);
-
-  useEffect(() => {
-    if (!isCoupleActive || !activeSpaceId) return;
-    const unsubscribe = subscribeMoods(activeSpaceId, mood => {
-      if (mood.user_id === userId) {
-        setMyMood(toMoodEntry(mood));
-      } else {
-        setPartnerMoodState(toMoodEntry(mood, true));
-      }
-    });
-    return () => unsubscribe();
-  }, [activeSpaceId, isCoupleActive, userId]);
+  }, []);
 
   const handleMoodSelect = async (mood: MoodOption) => {
     setLoading(true);
     try {
-      if (isCoupleActive && activeSpaceId && userId) {
-        const { mood: savedMood, error: moodError } = await postMood(activeSpaceId, userId, mood);
-        if (moodError || !savedMood) throw moodError ?? new Error("Failed to save mood");
-        setMyMood(toMoodEntry(savedMood));
-      } else {
-        await setMood(mood);
-        const updated = await getMood();
-        setMyMood(updated);
-      }
-    } catch (err) {
+      await setMood(mood);
+      const updated = await getMood();
+      setMyMood(updated);
+    } catch {
       setError("Could not save mood.");
     } finally {
       setLoading(false);
@@ -142,14 +81,8 @@ export function SanctuaryScreen() {
     const uri = result.assets[0].uri;
     setLoading(true);
     try {
-      if (isCoupleActive && activeSpaceId && userId) {
-        const { uri: remoteUri, error: uploadError } = await uploadSnapshot(activeSpaceId, userId, uri);
-        if (uploadError || !remoteUri) throw uploadError ?? new Error("Upload failed");
-        setSnapshot({ id: `snapshot-${Date.now()}`, uri: remoteUri, createdAt: Date.now() });
-      } else {
-        const snap = await saveSnapshot(uri);
-        setSnapshot(snap);
-      }
+      const snap = await saveSnapshot(uri);
+      setSnapshot(snap);
     } catch {
       setError("Could not save snapshot.");
     } finally {
@@ -252,14 +185,7 @@ export function SanctuaryScreen() {
               <Ionicons name="image-outline" size={20} color={palette.primary} />
             </View>
 
-            {snapshot ? (
-              <Image source={{ uri: snapshot.uri }} style={styles.snapshot} resizeMode="cover" />
-            ) : (
-              <View style={styles.snapshotPlaceholder}>
-                <Ionicons name="camera-outline" size={24} color={palette.muted} />
-                <Text style={styles.mutedText}>No photo yet for today.</Text>
-              </View>
-            )}
+            <Image source={{ uri: snapshot?.uri || PLACEHOLDER_IMAGE }} style={styles.snapshot} resizeMode="cover" />
 
             <TouchableOpacity style={styles.primaryButton} onPress={pickImage}>
               <Ionicons name="add" size={18} color="white" />
