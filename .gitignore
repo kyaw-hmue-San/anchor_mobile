@@ -39,3 +39,10 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# firebase local state
+.firebase/
+.firebaserc
+
+# generated web output not used by firebase hosting (uses dist/)
+public/
