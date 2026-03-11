@@ -4,6 +4,7 @@ import { NavigationContainer } from "@react-navigation/native";
 import { useFonts } from "expo-font";
 import { Ionicons } from "@expo/vector-icons";
 import { RootNavigator } from "./navigation/RootNavigator";
+import { linking } from "./navigation/linking";
 import { SpaceProvider } from "../context/SpaceContext";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AppThemeColors, ThemeProvider, useAppTheme } from "../context/ThemeContext";
@@ -54,7 +55,7 @@ function AppShell() {
     <SpaceProvider>
       <SafeAreaProvider>
         <RootErrorBoundary colors={colors}>
-          <NavigationContainer theme={navigationTheme}>
+          <NavigationContainer theme={navigationTheme} linking={linking}>
             <RootNavigator />
           </NavigationContainer>
         </RootErrorBoundary>
