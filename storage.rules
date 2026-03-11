@@ -1,0 +1,20 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSpacePath(path) {
+      return path.matches('spaces/[^/]+/snapshots/.*');
+    }
+
+    function isUserPath(path) {
+      return path.matches('users/' + request.auth.uid + '/private/snapshots/.*');
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if isSignedIn() && (isSpacePath(allPaths) || isUserPath(allPaths));
+    }
+  }
+}

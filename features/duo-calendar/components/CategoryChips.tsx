@@ -1,6 +1,7 @@
 import React from "react";
 import { View, TouchableOpacity, Text, StyleSheet } from "react-native";
 import { EventCategory } from "../../../models/types";
+import { useAppTheme } from "../../../context/ThemeContext";
 
 type Props = {
   categories: EventCategory[];
@@ -9,15 +10,17 @@ type Props = {
 };
 
 export function CategoryChips({ categories, selected, onSelect }: Props) {
+  const { colors } = useAppTheme();
+
   return (
     <View style={styles.chipRow}>
       {categories.map(cat => (
         <TouchableOpacity
           key={cat}
           onPress={() => onSelect(cat)}
-          style={[styles.chip, selected === cat && styles.chipActive]}
+          style={[styles.chip, { borderColor: colors.border, backgroundColor: colors.surface }, selected === cat && [styles.chipActive, { borderColor: colors.primary, backgroundColor: colors.primarySoft }]]}
         >
-          <Text style={styles.chipText}>{cat}</Text>
+          <Text style={[styles.chipText, { color: colors.text }]}>{cat}</Text>
         </TouchableOpacity>
       ))}
     </View>
@@ -36,5 +39,5 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   chipActive: { backgroundColor: "#F3E8FF", borderColor: "#7C3AED" },
-  chipText: { color: "#111827", textTransform: "capitalize" },
+  chipText: { textTransform: "capitalize" },
 });

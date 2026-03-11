@@ -1,37 +1,62 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import {
+  User,
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut as firebaseSignOut,
+} from "firebase/auth";
+import { collection, onSnapshot } from "firebase/firestore";
+import { getFirebaseAuth, getFirebaseConfigError, getFirebaseDb, isFirebaseConfigured } from "../services/firebase";
+import {
+  checkSpaceMembership,
+  createPairingCodeRecord,
+  createSpaceRecord,
+  joinSpaceWithCodeRecord,
+} from "../services/spaces";
 
 const MODE_KEY = "anchor:mode";
 const SPACE_KEY = "anchor:space";
-const SESSION_KEY = "anchor:session";
 
 type SpaceMode = "solo" | "couple";
-type MockSession = { user: { id: string; email: string } };
-type PairingCode = { code: string; spaceId: string; expiresAt: number; used: boolean };
+type AppSession = { user: { id: string; email: string } };
+
+function toSession(user: User | null): AppSession | null {
+  if (!user?.uid || !user.email) return null;
+  return { user: { id: user.uid, email: user.email } };
+}
 
 interface SpaceContextValue {
   loading: boolean;
-  session: MockSession | null;
+  startupIssue: string | null;
+  session: AppSession | null;
   userId: string | null;
   mode: SpaceMode;
   activeSpaceId: string | null;
+  spaceMemberCount: number;
+  isCoupleConnected: boolean;
   setSoloMode: () => Promise<void>;
+  setCoupleMode: () => Promise<Error | null>;
   signIn: (email: string, password: string) => Promise<Error | null>;
   signUp: (email: string, password: string) => Promise<Error | null>;
   signOut: () => Promise<void>;
   createSpace: (name: string) => Promise<{ spaceId?: string; error?: Error | null }>;
   joinWithCode: (code: string) => Promise<{ spaceId?: string; error?: Error | null }>;
   generateCode: (spaceId: string, ttlMinutes?: number) => Promise<{ code?: string; error?: Error | null }>;
+  retrySessionBootstrap: () => Promise<void>;
 }
 
 const SpaceContext = createContext<SpaceContextValue | undefined>(undefined);
 
 export function SpaceProvider({ children }: { children: React.ReactNode }) {
-  const [session, setSession] = useState<MockSession | null>(null);
+  const [session, setSession] = useState<AppSession | null>(null);
   const [mode, setMode] = useState<SpaceMode>("solo");
   const [activeSpaceId, setActiveSpaceId] = useState<string | null>(null);
-  const [pairingCodes, setPairingCodes] = useState<PairingCode[]>([]);
+  const [spaceMemberCount, setSpaceMemberCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [startupIssue, setStartupIssue] = useState<string | null>(null);
+  const [bootstrapVersion, setBootstrapVersion] = useState(0);
 
   const userId = session?.user?.id ?? null;
 
@@ -44,54 +69,159 @@ export function SpaceProvider({ children }: { children: React.ReactNode }) {
     ]);
   }, []);
 
-  useEffect(() => {
-    const init = async () => {
-      const [[, storedMode], [, storedSpace], [, storedSession]] = await AsyncStorage.multiGet([MODE_KEY, SPACE_KEY, SESSION_KEY]);
-      setMode((storedMode as SpaceMode) || "solo");
-      setActiveSpaceId(storedSpace || null);
-      if (storedSession) {
-        try {
-          setSession(JSON.parse(storedSession) as MockSession);
-        } catch {
-          setSession(null);
-        }
-      }
-      setLoading(false);
-    };
-    init();
+  const retrySessionBootstrap = useCallback(async () => {
+    setLoading(true);
+    setStartupIssue(null);
+    setBootstrapVersion(prev => prev + 1);
   }, []);
 
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+    let isMounted = true;
+
+    const init = async () => {
+      const [[, storedMode], [, storedSpace]] = await AsyncStorage.multiGet([MODE_KEY, SPACE_KEY]);
+      if (!isMounted) return;
+      setMode((storedMode as SpaceMode) || "solo");
+      setActiveSpaceId(storedSpace || null);
+      setStartupIssue(null);
+
+      if (!isFirebaseConfigured()) {
+        setStartupIssue(getFirebaseConfigError() || "Firebase is not configured.");
+        setSession(null);
+        setLoading(false);
+        return;
+      }
+
+      const auth = getFirebaseAuth();
+      if (!auth) {
+        setStartupIssue("Auth service is unavailable right now.");
+        setSession(null);
+        setLoading(false);
+        return;
+      }
+
+      unsubscribe = onAuthStateChanged(
+        auth,
+        user => {
+          setSession(toSession(user));
+          setStartupIssue(null);
+          setLoading(false);
+        },
+        error => {
+          const message = error instanceof Error ? error.message : "Session could not be restored.";
+          const normalized = /network|offline|failed|unavailable/i.test(message)
+            ? "Network looks offline. Check your internet and try again."
+            : message;
+          setStartupIssue(normalized);
+          setSession(null);
+          setLoading(false);
+        }
+      );
+    };
+
+    init();
+
+    return () => {
+      isMounted = false;
+      unsubscribe?.();
+    };
+  }, [bootstrapVersion]);
+
   const setSoloMode = useCallback(async () => {
+    setSpaceMemberCount(0);
     await persist("solo", null);
   }, [persist]);
 
+  const setCoupleMode = useCallback(async () => {
+    if (!activeSpaceId) return new Error("Create or join a space first");
+    if (!userId) return new Error("Sign in to use couple mode");
+
+    try {
+      const isMember = await checkSpaceMembership(activeSpaceId, userId);
+      if (!isMember) return new Error("You are not a member of the active space");
+      await persist("couple", activeSpaceId);
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error : new Error("Could not switch to couple mode");
+    }
+  }, [activeSpaceId, persist, userId]);
+
+  useEffect(() => {
+    if (!isFirebaseConfigured() || mode !== "couple" || !activeSpaceId) {
+      setSpaceMemberCount(0);
+      return;
+    }
+
+    const db = getFirebaseDb();
+    if (!db) {
+      setSpaceMemberCount(0);
+      return;
+    }
+
+    const membersRef = collection(db, "spaces", activeSpaceId, "members");
+    const unsubscribe = onSnapshot(
+      membersRef,
+      snapshot => {
+        setSpaceMemberCount(snapshot.size);
+      },
+      () => {
+        setSpaceMemberCount(0);
+      }
+    );
+
+    return unsubscribe;
+  }, [activeSpaceId, mode]);
+
   const signIn = useCallback(async (email: string, password: string) => {
     if (!email.trim() || !password.trim()) return new Error("Email and password are required");
-    const nextSession: MockSession = {
-      user: { id: `user-${Date.now()}`, email: email.trim().toLowerCase() },
-    };
-    setSession(nextSession);
-    await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(nextSession));
-    return null;
+    const configErr = getFirebaseConfigError();
+    if (configErr) return new Error(configErr);
+    const auth = getFirebaseAuth();
+    if (!auth) return new Error("Firebase auth is unavailable");
+    try {
+      await signInWithEmailAndPassword(auth, email.trim().toLowerCase(), password);
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error : new Error("Unable to sign in");
+    }
   }, []);
 
   const signUp = useCallback(async (email: string, password: string) => {
     if (!email.trim() || !password.trim()) return new Error("Email and password are required");
-    return null;
+    const configErr = getFirebaseConfigError();
+    if (configErr) return new Error(configErr);
+    const auth = getFirebaseAuth();
+    if (!auth) return new Error("Firebase auth is unavailable");
+    try {
+      await createUserWithEmailAndPassword(auth, email.trim().toLowerCase(), password);
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error : new Error("Unable to create account");
+    }
   }, []);
 
   const signOut = useCallback(async () => {
     setSession(null);
-    await AsyncStorage.removeItem(SESSION_KEY);
+    if (isFirebaseConfigured()) {
+      const auth = getFirebaseAuth();
+      if (auth) {
+        await firebaseSignOut(auth);
+      }
+    }
     await persist("solo", null);
   }, [persist]);
 
   const createSpace = useCallback(
     async (name: string) => {
       if (!userId) return { error: new Error("Not signed in") };
-      const spaceId = `space-${Date.now()}`;
-      await persist("couple", spaceId);
-      return { spaceId };
+      try {
+        const spaceId = await createSpaceRecord(userId, name);
+        await persist("couple", spaceId);
+        return { spaceId };
+      } catch (error) {
+        return { error: error instanceof Error ? error : new Error("Could not create space") };
+      }
     },
     [persist, userId]
   );
@@ -99,41 +229,53 @@ export function SpaceProvider({ children }: { children: React.ReactNode }) {
   const joinWithCode = useCallback(
     async (code: string) => {
       if (!userId) return { error: new Error("Not signed in") };
-      const found = pairingCodes.find(item => item.code === code && !item.used && item.expiresAt > Date.now());
-      if (!found) return { error: new Error("Invalid or expired pairing code") };
-      setPairingCodes(prev => prev.map(item => (item.code === code ? { ...item, used: true } : item)));
-      await persist("couple", found.spaceId);
-      return { spaceId: found.spaceId };
+      try {
+        const spaceId = await joinSpaceWithCodeRecord(userId, code);
+        await persist("couple", spaceId);
+        return { spaceId };
+      } catch (error) {
+        return { error: error instanceof Error ? error : new Error("Invalid or expired pairing code") };
+      }
     },
-    [pairingCodes, persist, userId]
+    [persist, userId]
   );
 
-  const generateCode = useCallback(async (spaceId: string, ttlMinutes = 15) => {
-    if (!spaceId) return { error: new Error("No active space") };
-    const code = Math.random().toString(36).slice(2, 8).toUpperCase();
-    const next: PairingCode = {
-      code,
-      spaceId,
-      expiresAt: Date.now() + ttlMinutes * 60_000,
-      used: false,
-    };
-    setPairingCodes(prev => [next, ...prev].slice(0, 20));
-    return { code, error: null };
-  }, []);
+  const generateCode = useCallback(
+    async (spaceId: string, ttlMinutes = 15) => {
+      if (!spaceId) return { error: new Error("No active space") };
+      if (!userId) return { error: new Error("Not signed in") };
+
+      try {
+        const isMember = await checkSpaceMembership(spaceId, userId);
+        if (!isMember) return { error: new Error("You are not a member of this space") };
+
+        const code = await createPairingCodeRecord(spaceId, userId, ttlMinutes);
+        return { code, error: null };
+      } catch (error) {
+        return { error: error instanceof Error ? error : new Error("Could not generate code") };
+      }
+    },
+    [userId]
+  );
 
   const value: SpaceContextValue = {
     loading,
+    startupIssue,
     session,
     userId,
     mode,
     activeSpaceId,
+    spaceMemberCount,
+    isCoupleConnected: mode === "couple" && !!activeSpaceId && spaceMemberCount >= 2,
     setSoloMode,
+    setCoupleMode,
     signIn,
     signUp,
     signOut,
     createSpace,
     joinWithCode,
     generateCode,
+    retrySessionBootstrap,
   };
 
   return <SpaceContext.Provider value={value}>{children}</SpaceContext.Provider>;

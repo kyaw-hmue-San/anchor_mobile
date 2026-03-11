@@ -1,10 +1,17 @@
 export const ROUTES = {
+  Landing: "Landing",
   Auth: "Auth",
+  QuickPinSetup: "QuickPinSetup",
+  QuickPinUnlock: "QuickPinUnlock",
+  ChangeQuickPin: "ChangeQuickPin",
   MainTabs: "MainTabs",
   Sanctuary: "Sanctuary",
   DuoCalendar: "DuoCalendar",
   DuoCalendarHome: "DuoCalendarHome",
   GuardianAlert: "GuardianAlert",
   Vault: "Vault",
+  Profile: "Profile",
+  Spaces: "Spaces",
   Settings: "Settings",
+  Help: "Help",
 } as const;

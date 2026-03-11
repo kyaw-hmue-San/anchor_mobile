@@ -1,0 +1,42 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSpaceMember(spaceId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/spaces/$(spaceId)/members/$(request.auth.uid));
+    }
+
+    match /users/{userId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+
+      match /private/{document=**} {
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+      }
+    }
+
+    match /spaces/{spaceId} {
+      allow read: if isSpaceMember(spaceId);
+      allow create: if isSignedIn();
+      allow update, delete: if isSpaceMember(spaceId);
+
+      match /members/{memberId} {
+        allow read: if isSpaceMember(spaceId);
+        allow write: if isSignedIn() && request.auth.uid == memberId;
+      }
+
+      match /{document=**} {
+        allow read, write: if isSpaceMember(spaceId);
+      }
+    }
+
+    match /pairing_codes/{code} {
+      allow create: if isSignedIn();
+      allow read, update: if isSignedIn();
+      allow delete: if false;
+    }
+  }
+}

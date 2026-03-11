@@ -1,6 +1,7 @@
 export type SectionKey = "spaces" | "app" | "help";
 
 export type AppSettings = {
+  darkMode: boolean;
   enableNotifications: boolean;
   messageNotifications: boolean;
   locationUpdates: boolean;
@@ -13,6 +14,7 @@ export type AppSettings = {
 };
 
 export const defaultSettings: AppSettings = {
+  darkMode: false,
   enableNotifications: true,
   messageNotifications: true,
   locationUpdates: true,

@@ -6,10 +6,11 @@ import { Ionicons } from "@expo/vector-icons";
 import { RootNavigator } from "./navigation/RootNavigator";
 import { SpaceProvider } from "../context/SpaceContext";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { AppThemeColors, ThemeProvider, useAppTheme } from "../context/ThemeContext";
 
 type RootErrorBoundaryState = { error: Error | null };
 
-class RootErrorBoundary extends React.Component<{ children: React.ReactNode }, RootErrorBoundaryState> {
+class RootErrorBoundary extends React.Component<{ children: React.ReactNode; colors: AppThemeColors }, RootErrorBoundaryState> {
   state: RootErrorBoundaryState = { error: null };
 
   static getDerivedStateFromError(error: Error): RootErrorBoundaryState {
@@ -21,12 +22,13 @@ class RootErrorBoundary extends React.Component<{ children: React.ReactNode }, R
   }
 
   render() {
+    const { colors } = this.props;
     if (this.state.error) {
       return (
-        <View style={styles.errorWrap}>
-          <Text style={styles.errorTitle}>Something crashed on web</Text>
-          <ScrollView style={styles.errorBox} contentContainerStyle={{ padding: 12 }}>
-            <Text style={styles.errorText}>{this.state.error.message}</Text>
+        <View style={[styles.errorWrap, { backgroundColor: colors.background }] }>
+          <Text style={[styles.errorTitle, { color: colors.danger }]}>Something crashed on web</Text>
+          <ScrollView style={[styles.errorBox, { borderColor: colors.border, backgroundColor: colors.surface }]} contentContainerStyle={{ padding: 12 }}>
+            <Text style={[styles.errorText, { color: colors.text }]}>{this.state.error.message}</Text>
           </ScrollView>
         </View>
       );
@@ -35,12 +37,14 @@ class RootErrorBoundary extends React.Component<{ children: React.ReactNode }, R
   }
 }
 
-export function App() {
+function AppShell() {
+  const { colors, navigationTheme } = useAppTheme();
+
   const [fontsLoaded] = useFonts(Ionicons.font);
 
   if (!fontsLoaded) {
     return (
-      <View style={styles.centered}>
+      <View style={[styles.centered, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="small" color="#7C3AED" />
       </View>
     );
@@ -49,13 +53,21 @@ export function App() {
   return (
     <SpaceProvider>
       <SafeAreaProvider>
-        <RootErrorBoundary>
-          <NavigationContainer>
+        <RootErrorBoundary colors={colors}>
+          <NavigationContainer theme={navigationTheme}>
             <RootNavigator />
           </NavigationContainer>
         </RootErrorBoundary>
       </SafeAreaProvider>
     </SpaceProvider>
+  );
+}
+
+export function App() {
+  return (
+    <ThemeProvider>
+      <AppShell />
+    </ThemeProvider>
   );
 }
 

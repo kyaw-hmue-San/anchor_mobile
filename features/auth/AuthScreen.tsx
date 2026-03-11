@@ -3,10 +3,12 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator 
 import { useNavigation } from "@react-navigation/native";
 import { ROUTES } from "../../main/navigation/routes";
 import { useSpace } from "../../context/SpaceContext";
+import { useAppTheme } from "../../context/ThemeContext";
 
 export function AuthScreen() {
   const navigation = useNavigation();
   const { session, loading, signIn, signUp, setSoloMode } = useSpace();
+  const { colors, isDark } = useAppTheme();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSignUp, setIsSignUp] = useState(false);
@@ -16,7 +18,7 @@ export function AuthScreen() {
 
   useEffect(() => {
     if (session) {
-      navigation.reset({ index: 0, routes: [{ name: ROUTES.MainTabs as never }] });
+      navigation.reset({ index: 0, routes: [{ name: ROUTES.Landing as never }] });
     }
   }, [navigation, session]);
 
@@ -34,8 +36,8 @@ export function AuthScreen() {
     if (err) {
       setError(err.message);
     } else {
-      setStatus(isSignUp ? "Account created. You can sign in now." : "Signed in. Redirecting…");
-      navigation.navigate(ROUTES.MainTabs as never);
+      setStatus(isSignUp ? "Account created. Redirecting…" : "Signed in. Redirecting…");
+      navigation.reset({ index: 0, routes: [{ name: ROUTES.Landing as never }] });
     }
     setPending(false);
   };
@@ -50,19 +52,19 @@ export function AuthScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Anchor</Text>
-      <Text style={styles.subtitle}>Private sanctuary for two. Choose how you sign in.</Text>
+    <View style={[styles.container, { backgroundColor: colors.background }] }>
+      <Text style={[styles.title, { color: colors.text }]}>Anchor</Text>
+      <Text style={[styles.subtitle, { color: colors.muted }]}>Private sanctuary for two. Choose how you sign in.</Text>
 
       <View style={styles.toggleRow}>
         <TouchableOpacity
-          style={[styles.toggleButton, !isSignUp && styles.toggleButtonActive]}
+          style={[styles.toggleButton, { borderColor: colors.border }, !isSignUp && [styles.toggleButtonActive, { borderColor: colors.primary, backgroundColor: colors.primarySoft }]]}
           onPress={() => setIsSignUp(false)}
         >
           <Text style={[styles.toggleText, !isSignUp && styles.toggleTextActive]}>Sign In</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.toggleButton, isSignUp && styles.toggleButtonActive]}
+          style={[styles.toggleButton, { borderColor: colors.border }, isSignUp && [styles.toggleButtonActive, { borderColor: colors.primary, backgroundColor: colors.primarySoft }]]}
           onPress={() => setIsSignUp(true)}
         >
           <Text style={[styles.toggleText, isSignUp && styles.toggleTextActive]}>Sign Up</Text>
@@ -73,8 +75,8 @@ export function AuthScreen() {
         placeholder="Email"
         value={email}
         onChangeText={setEmail}
-        style={styles.input}
-        placeholderTextColor="#6B7280"
+        style={[styles.input, { borderColor: colors.border, backgroundColor: colors.surface, color: colors.text }]}
+        placeholderTextColor={colors.muted}
         keyboardType="email-address"
         autoCapitalize="none"
       />
@@ -82,19 +84,19 @@ export function AuthScreen() {
         placeholder="Password"
         value={password}
         onChangeText={setPassword}
-        style={styles.input}
-        placeholderTextColor="#6B7280"
+        style={[styles.input, { borderColor: colors.border, backgroundColor: colors.surface, color: colors.text }]}
+        placeholderTextColor={colors.muted}
         secureTextEntry
       />
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
       {status ? <Text style={styles.status}>{status}</Text> : null}
 
-      <TouchableOpacity style={styles.primaryButton} onPress={handleSubmit} disabled={pending || loading}>
+      <TouchableOpacity style={[styles.primaryButton, { backgroundColor: colors.primary }]} onPress={handleSubmit} disabled={pending || loading}>
         {pending ? <ActivityIndicator color="white" /> : <Text style={styles.primaryButtonText}>{isSignUp ? "Create account" : "Sign in"}</Text>}
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.secondaryButton} onPress={handleSolo} disabled={pending || loading}>
+      <TouchableOpacity style={[styles.secondaryButton, { backgroundColor: isDark ? colors.surfaceAlt : "#E5E7EB" }]} onPress={handleSolo} disabled={pending || loading}>
         <Text style={styles.secondaryButtonText}>Continue in solo mode</Text>
       </TouchableOpacity>
     </View>

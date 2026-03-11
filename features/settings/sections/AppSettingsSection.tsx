@@ -3,10 +3,12 @@ import { View, Text, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { ToggleRow } from "../components/ToggleRow";
 import { AppSettings } from "../types";
+import { useAppTheme } from "../../../context/ThemeContext";
 
 type Props = {
   settings: AppSettings;
   toggle: (key: keyof AppSettings) => void;
+  saving?: boolean;
 };
 
 type Group = {
@@ -16,6 +18,11 @@ type Group = {
 };
 
 const groups: Group[] = [
+  {
+    title: "Appearance",
+    icon: "moon-outline",
+    items: [{ key: "darkMode", label: "Dark Mode", subtitle: "Use dark colors across the app" }],
+  },
   {
     title: "Notifications",
     icon: "notifications-outline",
@@ -45,24 +52,38 @@ const groups: Group[] = [
   },
 ];
 
-export function AppSettingsSection({ settings, toggle }: Props) {
+const notificationDependent: (keyof AppSettings)[] = [
+  "messageNotifications",
+  "locationUpdates",
+  "sound",
+  "countdownReminders",
+  "guardianAlerts",
+];
+
+export function AppSettingsSection({ settings, toggle, saving = false }: Props) {
+  const { colors, isDark } = useAppTheme();
+
   return (
     <>
       {groups.map(group => (
-        <View key={group.title} style={styles.sectionCard}>
-          <View style={styles.sectionHeader}>
-            <Ionicons name={group.icon} size={18} color="#111827" />
-            <Text style={styles.sectionTitle}>{group.title}</Text>
+        <View key={group.title} style={[styles.sectionCard, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
+          <View style={[styles.sectionHeader, { backgroundColor: isDark ? "#1E1B4B" : "#F3E8FF" }] }>
+            <Ionicons name={group.icon} size={18} color={colors.text} />
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>{group.title}</Text>
           </View>
-          {group.items.map(item => (
-            <ToggleRow
-              key={item.key}
-              label={item.label}
-              subtitle={item.subtitle}
-              value={settings[item.key]}
-              onPress={() => toggle(item.key)}
-            />
-          ))}
+          {group.items.map(item => {
+            const disabled = saving || (!settings.enableNotifications && notificationDependent.includes(item.key));
+            return (
+              <ToggleRow
+                key={item.key}
+                label={item.label}
+                subtitle={item.subtitle}
+                value={settings[item.key]}
+                onPress={() => toggle(item.key)}
+                disabled={disabled}
+              />
+            );
+          })}
         </View>
       ))}
     </>

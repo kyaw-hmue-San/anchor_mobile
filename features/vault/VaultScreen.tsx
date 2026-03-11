@@ -1,19 +1,29 @@
-import React, { useEffect, useState } from "react";
-import { View, Text, Image, TextInput, TouchableOpacity, StyleSheet, ScrollView } from "react-native";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { View, Text, Image, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { AnchorLogo } from "../../components/AnchorLogo";
 import { MenuButton } from "../../components/MenuButton";
-import { Memory, Snapshot } from "../../models/types";
+import { ConnectionStatusBanner } from "../../components/ConnectionStatusBanner";
+import { Memory, MemoryTag, Snapshot } from "../../models/types";
 import { addMemoryFromSnapshot, addNoteMemory, getTodaySnapshot, listMemories } from "../../services/storage";
-const PLACEHOLDER_IMAGE = "https://placehold.co/600x400";
+import { useAppTheme } from "../../context/ThemeContext";
+import { getFriendlyFirebaseError } from "../../services/firebaseErrors";
+
+const memoryTags: MemoryTag[] = ["trip", "anniversary", "apology", "gift"];
 
 export function VaultScreen() {
+  const { colors } = useAppTheme();
   const [memories, setMemories] = useState<Memory[]>([]);
   const [noteTitle, setNoteTitle] = useState("");
   const [noteDesc, setNoteDesc] = useState("");
   const [todaySnap, setTodaySnap] = useState<Snapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [savingNote, setSavingNote] = useState(false);
+  const [savingSnapshot, setSavingSnapshot] = useState(false);
+  const [activeTag, setActiveTag] = useState<MemoryTag | "all">("all");
+  const [draftTag, setDraftTag] = useState<MemoryTag>("anniversary");
 
   const load = async () => {
     setError(null);
@@ -21,94 +31,210 @@ export function VaultScreen() {
       const [mems, snap] = await Promise.all([listMemories(), getTodaySnapshot()]);
       setMemories(mems);
       setTodaySnap(snap);
-    } catch {
-      setError("Could not load Vault data.");
+    } catch (error) {
+      setError(getFriendlyFirebaseError(error, "Could not load Vault data."));
     }
   };
 
   useEffect(() => {
-    load();
+    load().finally(() => setInitialLoading(false));
+  }, []);
+
+  const onRetrySync = useCallback(async () => {
+    setInitialLoading(true);
+    await load();
+    setInitialLoading(false);
   }, []);
 
   const addSnapshotMemory = async () => {
-    await addMemoryFromSnapshot(todaySnap ?? { id: `mock-${Date.now()}`, uri: PLACEHOLDER_IMAGE, createdAt: Date.now() });
-    await load();
+    if (savingNote || savingSnapshot) return;
+
+    if (!todaySnap) {
+      setError("No snapshot found for today. Add one in Sanctuary first.");
+      return;
+    }
+
+    setError(null);
+    setSavingSnapshot(true);
+    try {
+      await addMemoryFromSnapshot(todaySnap);
+      await load();
+    } catch (error) {
+      setError(getFriendlyFirebaseError(error, "Could not save snapshot to Vault."));
+    } finally {
+      setSavingSnapshot(false);
+    }
   };
 
   const addNote = async () => {
+    if (savingNote || savingSnapshot) return;
     if (!noteTitle.trim()) return;
-    await addNoteMemory(noteTitle.trim(), noteDesc.trim());
-    setNoteTitle("");
-    setNoteDesc("");
-    await load();
+
+    setError(null);
+    setSavingNote(true);
+    try {
+      await addNoteMemory(noteTitle.trim(), noteDesc.trim(), draftTag);
+      setNoteTitle("");
+      setNoteDesc("");
+      await load();
+    } catch (error) {
+      setError(getFriendlyFirebaseError(error, "Could not save note to Vault."));
+    } finally {
+      setSavingNote(false);
+    }
   };
 
+  const filteredMemories = useMemo(
+    () => (activeTag === "all" ? memories : memories.filter(item => item.tag === activeTag)),
+    [activeTag, memories]
+  );
+
+  if (initialLoading) {
+    return (
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={["top","left","right"]}>
+        <View style={styles.centered}>
+          <ActivityIndicator size="small" color={colors.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top","left","right"]}>
-      <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={["top","left","right"]}>
+      <ScrollView style={[styles.screen, { backgroundColor: colors.background }]} contentContainerStyle={styles.content}>
           <View style={styles.topBar}>
             <AnchorLogo size={35} />
-            <MenuButton color={palette.text} />
+            <MenuButton color={colors.text} />
           </View>
+
+          <ConnectionStatusBanner />
 
           <View style={styles.headerBlock}>
-            <Text style={styles.screenTitle}>The Vault</Text>
-            <Text style={styles.muted}>Treasured moments & love letters</Text>
+            <Text style={[styles.screenTitle, { color: colors.text }]}>The Vault</Text>
+            <Text style={[styles.muted, { color: colors.muted }]}>Treasured moments & love letters</Text>
           </View>
 
-          {error ? <Text style={[styles.muted, { color: "#B91C1C" }]}>{error}</Text> : null}
-
-          <View style={styles.banner}>
-            <View style={styles.bannerRow}>
-              <Ionicons name="cloud-download-outline" size={18} color={palette.text} />
-              <Text style={styles.bannerTitle}>Available Offline</Text>
+          {error ? (
+            <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Text style={[styles.muted, { color: colors.danger }]}>{error}</Text>
+              <TouchableOpacity style={[styles.primaryButton, { backgroundColor: colors.primary }]} onPress={onRetrySync}>
+                <Text style={styles.primaryButtonText}>Retry sync</Text>
+              </TouchableOpacity>
             </View>
-            <Text style={styles.bannerSubtitle}>All memories are cached and accessible even without internet.</Text>
+          ) : null}
+
+          <View style={[styles.banner, { backgroundColor: colors.primarySoft, borderColor: colors.border }]}>
+            <View style={styles.bannerRow}>
+              <Ionicons name="cloud-download-outline" size={18} color={colors.text} />
+              <Text style={[styles.bannerTitle, { color: colors.text }]}>Available Offline</Text>
+            </View>
+            <Text style={[styles.bannerSubtitle, { color: colors.muted }]}>All memories are cached and accessible even without internet.</Text>
           </View>
 
-          <View style={styles.card}>
+          <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <View style={styles.cardHeaderRow}>
-              <Text style={styles.cardTitle}>Add note memory</Text>
-              <Ionicons name="create-outline" size={20} color={palette.primary} />
+              <Text style={[styles.cardTitle, { color: colors.text }]}>Add note memory</Text>
+              <Ionicons name="create-outline" size={20} color={colors.primary} />
             </View>
             <TextInput
               placeholder="Title"
               value={noteTitle}
               onChangeText={setNoteTitle}
-              style={styles.input}
-              placeholderTextColor={palette.muted}
+              style={[styles.input, { borderColor: colors.border, backgroundColor: colors.surface, color: colors.text }]}
+              placeholderTextColor={colors.muted}
+              editable={!savingNote && !savingSnapshot}
             />
             <TextInput
               placeholder="Description"
               value={noteDesc}
               onChangeText={setNoteDesc}
-              style={[styles.input, { minHeight: 90 }]}
-              placeholderTextColor={palette.muted}
+              style={[styles.input, { minHeight: 90, borderColor: colors.border, backgroundColor: colors.surface, color: colors.text }]}
+              placeholderTextColor={colors.muted}
               multiline
+              editable={!savingNote && !savingSnapshot}
             />
-            <TouchableOpacity style={styles.primaryButton} onPress={addNote}>
-              <Text style={styles.primaryButtonText}>Save note to Vault</Text>
+            <View style={styles.tagRow}>
+              {memoryTags.map(tag => (
+                <TouchableOpacity
+                  key={tag}
+                  style={[
+                    styles.tagChip,
+                    { borderColor: colors.border, backgroundColor: colors.surfaceAlt },
+                    draftTag === tag && { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+                  ]}
+                  onPress={() => setDraftTag(tag)}
+                  disabled={savingNote || savingSnapshot}
+                >
+                  <Text style={[styles.muted, { color: draftTag === tag ? colors.primary : colors.text }]}>{tag}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TouchableOpacity
+              style={[styles.primaryButton, { backgroundColor: colors.primary }, (savingNote || savingSnapshot) && styles.disabledButton]}
+              onPress={addNote}
+              disabled={savingNote || savingSnapshot}
+            >
+              <Text style={styles.primaryButtonText}>{savingNote ? "Saving note..." : "Save note to Vault"}</Text>
             </TouchableOpacity>
           </View>
 
-          <View style={styles.card}>
+          <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <View style={styles.cardHeaderRow}>
-              <Text style={styles.cardTitle}>Today’s snapshot</Text>
-              <Ionicons name="image-outline" size={20} color={palette.primary} />
+              <Text style={[styles.cardTitle, { color: colors.text }]}>Today’s snapshot</Text>
+              <Ionicons name="image-outline" size={20} color={colors.primary} />
             </View>
-            <Image source={{ uri: todaySnap?.uri || PLACEHOLDER_IMAGE }} style={styles.snapshot} resizeMode="cover" />
-            <TouchableOpacity style={styles.primaryButton} onPress={addSnapshotMemory}>
-              <Text style={styles.primaryButtonText}>Save snapshot to Vault</Text>
+            {todaySnap?.uri ? (
+              <Image source={{ uri: todaySnap.uri }} style={styles.snapshot} resizeMode="cover" />
+            ) : (
+              <View style={[styles.emptySnapshot, { borderColor: colors.border, backgroundColor: colors.surfaceAlt }]}>
+                <Text style={[styles.muted, { color: colors.muted }]}>No snapshot for today yet.</Text>
+              </View>
+            )}
+            <TouchableOpacity
+              style={[styles.primaryButton, { backgroundColor: colors.primary }, (savingNote || savingSnapshot) && styles.disabledButton]}
+              onPress={addSnapshotMemory}
+              disabled={savingNote || savingSnapshot}
+            >
+              <Text style={styles.primaryButtonText}>{savingSnapshot ? "Saving snapshot..." : "Save snapshot to Vault"}</Text>
             </TouchableOpacity>
+          </View>
+
+          <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.cardTitle, { color: colors.text }]}>Memory Collections</Text>
+            <View style={styles.tagRow}>
+              <TouchableOpacity
+                style={[
+                  styles.tagChip,
+                  { borderColor: colors.border, backgroundColor: colors.surfaceAlt },
+                  activeTag === "all" && { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+                ]}
+                onPress={() => setActiveTag("all")}
+              >
+                <Text style={[styles.muted, { color: activeTag === "all" ? colors.primary : colors.text }]}>all</Text>
+              </TouchableOpacity>
+              {memoryTags.map(tag => (
+                <TouchableOpacity
+                  key={tag}
+                  style={[
+                    styles.tagChip,
+                    { borderColor: colors.border, backgroundColor: colors.surfaceAlt },
+                    activeTag === tag && { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+                  ]}
+                  onPress={() => setActiveTag(tag)}
+                >
+                  <Text style={[styles.muted, { color: activeTag === tag ? colors.primary : colors.text }]}>{tag}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           </View>
 
           <View style={{ gap: 12 }}>
-            {memories.length === 0 ? (
-              <View style={styles.card}>
-                <Text style={styles.muted}>No memories yet.</Text>
+            {filteredMemories.length === 0 ? (
+              <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <Text style={[styles.muted, { color: colors.muted }]}>No memories yet.</Text>
               </View>
             ) : (
-              memories.map(item => (
+              filteredMemories.map(item => (
                 <MemoryCard key={item.id} memory={item} />
               ))
             )}
@@ -119,37 +245,39 @@ export function VaultScreen() {
 }
 
 function MemoryCard({ memory }: { memory: Memory }) {
+  const { colors, isDark } = useAppTheme();
   const date = new Date(memory.createdAt);
   const label = memory.type === "note" ? "Memory Note" : "Snapshot";
   const initial = "Y";
   const preview = memory.description || "";
   return (
-    <View style={styles.memoryCard}>
+    <View style={[styles.memoryCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
       <View style={styles.memoryBadges}>
-        <View style={[styles.pill, { backgroundColor: palette.primarySoft }]}> 
-          <Text style={styles.pillText}>{label}</Text>
+        <View style={[styles.pill, { backgroundColor: colors.primarySoft }]}> 
+          <Text style={[styles.pillText, { color: colors.primary }]}>{label}</Text>
         </View>
-        <View style={[styles.pill, { backgroundColor: "#FEF3C7" }]}> 
+        <View style={[styles.pill, { backgroundColor: isDark ? "#3F2A00" : "#FEF3C7" }]}> 
           <Text style={[styles.pillText, { color: "#92400E" }]}>Cached</Text>
         </View>
       </View>
 
-      <Text style={styles.memoryTitle}>{memory.title}</Text>
-      {preview ? <Text style={styles.memoryPreview}>{preview.slice(0, 120)}{preview.length > 120 ? "…" : ""}</Text> : null}
+      <Text style={[styles.memoryTitle, { color: colors.text }]}>{memory.title}</Text>
+      {memory.tag ? <Text style={[styles.memoryMeta, { color: colors.primary }]}>{memory.tag}</Text> : null}
+      {preview ? <Text style={[styles.memoryPreview, { color: colors.muted }]}>{preview.slice(0, 120)}{preview.length > 120 ? "…" : ""}</Text> : null}
       {memory.snapshotUri ? (
         <Image source={{ uri: memory.snapshotUri }} style={styles.memoryImage} resizeMode="cover" />
       ) : null}
 
       <View style={styles.memoryFooter}>
         <View style={styles.authorRow}>
-          <Text style={styles.memoryMeta}>You • {date.toDateString()}</Text>
+          <Text style={[styles.memoryMeta, { color: colors.muted }]}>You • {date.toDateString()}</Text>
         </View>
-        <View style={styles.avatarBubble}>
+        <View style={[styles.avatarBubble, { backgroundColor: colors.primary }]}>
           <Text style={styles.avatarText}>{initial}</Text>
         </View>
       </View>
       <View style={styles.memoryChevron}>
-        <Ionicons name="chevron-forward" size={16} color={palette.primary} />
+        <Ionicons name="chevron-forward" size={16} color={colors.primary} />
       </View>
     </View>
   );
@@ -168,6 +296,7 @@ const palette = {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: palette.background },
   screen: { flex: 1, backgroundColor: palette.background },
+  centered: { flex: 1, alignItems: "center", justifyContent: "center" },
   content: { padding: 16, gap: 16, paddingBottom: 32 },
   muted: { color: palette.muted },
   topBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
@@ -213,8 +342,27 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     alignItems: "center",
   },
+  disabledButton: { opacity: 0.6 },
+  tagRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  tagChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    minHeight: 34,
+    justifyContent: "center",
+  },
   primaryButtonText: { color: "white", fontWeight: "700" },
   snapshot: { width: "100%", height: 220, borderRadius: 12 },
+  emptySnapshot: {
+    width: "100%",
+    height: 220,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: "#FAFAFA",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   memoryCard: {
     position: "relative",
     backgroundColor: "#FFF",

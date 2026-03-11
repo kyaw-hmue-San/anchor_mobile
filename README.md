@@ -39,6 +39,32 @@ npm run ios
 npm run web
 ```
 
+## Firebase Setup (required for real auth)
+
+Create a `.env` file in the project root:
+
+```bash
+EXPO_PUBLIC_FIREBASE_API_KEY=your_api_key
+EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
+EXPO_PUBLIC_FIREBASE_PROJECT_ID=your_project_id
+EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=your_project.appspot.com
+EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
+EXPO_PUBLIC_FIREBASE_APP_ID=your_app_id
+```
+
+Then restart Expo:
+
+```bash
+npm run start
+```
+
+Current backend status:
+
+- Auth in `context/SpaceContext.tsx` uses Firebase Auth (email/password).
+- Spaces + pairing code use Firestore (`services/spaces.ts`).
+- Sanctuary mood, DuoCalendar events, Guardian Alert reads, Vault memories, and snapshots use Firebase (`services/storage.ts`).
+- Profile name persists to Firebase (`services/profile.ts`).
+
 ## Project Structure
 
 ```text
@@ -57,6 +83,36 @@ models/               Shared types/models
 assets/               Static assets
 supabase/             Supabase-related resources/config
 ```
+
+## Firebase Rules
+
+This project includes:
+
+- Firestore rules: `firestore.rules`
+- Storage rules: `storage.rules`
+
+Deploy rules after login:
+
+```bash
+npx firebase login
+npx firebase deploy --only firestore:rules,storage
+```
+
+### Web upload CORS setup (Firebase Storage)
+
+If profile image upload fails on web with a CORS / XMLHttpRequest preflight error, configure CORS on your Storage bucket once:
+
+```bash
+gsutil cors set firebase.storage.cors.json gs://your_project.appspot.com
+```
+
+Then verify:
+
+```bash
+gsutil cors get gs://your_project.appspot.com
+```
+
+This repo includes a starter config file: `firebase.storage.cors.json`.
 
 ## Entry Points
 

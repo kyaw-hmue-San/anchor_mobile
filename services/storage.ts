@@ -1,100 +1,298 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Event, Memory, MoodEntry, MoodOption, Snapshot, User } from "../models/types";
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  serverTimestamp,
+  setDoc,
+  where,
+} from "firebase/firestore";
+import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import {
+  ActivityItem,
+  CoupleGoal,
+  Event,
+  Memory,
+  MemoryTag,
+  MoodEntry,
+  MoodOption,
+  MoodStreakSummary,
+  PartnerPresence,
+  ReminderWindow,
+  SmartReminder,
+  Snapshot,
+  User,
+  WeeklyPlanDay,
+} from "../models/types";
+import { getFirebaseAuth, getFirebaseDb, getFirebaseStorage } from "./firebase";
 
-const KEYS = {
-  user: "anchor:user",
-  moods: "anchor:moods",
-  snapshot: "anchor:snapshot",
-  events: "anchor:events",
-  memories: "anchor:memories",
-};
+const MODE_KEY = "anchor:mode";
+const SPACE_KEY = "anchor:space";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const todayKey = () => new Date().toISOString().slice(0, 10);
 
-async function getJson<T>(key: string, fallback: T): Promise<T> {
-  const raw = await AsyncStorage.getItem(key);
-  if (!raw) return fallback;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
+type Scope = {
+  db: ReturnType<typeof getFirebaseDb>;
+  userId: string;
+  basePath: string[];
+  scopeId: string;
+};
+
+async function getScope(): Promise<Scope> {
+  const db = getFirebaseDb();
+  const auth = getFirebaseAuth();
+  const userId = auth?.currentUser?.uid;
+
+  if (!db || !userId) {
+    throw new Error("You must be signed in to use app data");
   }
+
+  const spaceId = await AsyncStorage.getItem(SPACE_KEY);
+  const mode = await AsyncStorage.getItem(MODE_KEY);
+
+  if (mode === "couple" && spaceId) {
+    return { db, userId, basePath: ["spaces", spaceId], scopeId: spaceId };
+  }
+
+  return { db, userId, basePath: ["users", userId, "private"], scopeId: userId };
 }
 
-async function setJson<T>(key: string, value: T) {
-  await AsyncStorage.setItem(key, JSON.stringify(value));
+function scopeCollection(scope: Scope, collectionName: string) {
+  return collection(scope.db!, `${scope.basePath.join("/")}/${collectionName}`);
+}
+
+async function getCurrentActorName(scope: Scope) {
+  const auth = getFirebaseAuth();
+  const explicit = auth?.currentUser?.displayName?.trim();
+  if (explicit) return explicit;
+
+  const selfDoc = await getDoc(doc(scope.db!, "users", scope.userId));
+  if (selfDoc.exists()) {
+    const displayName = (selfDoc.data() as { displayName?: string }).displayName?.trim();
+    if (displayName) return displayName;
+  }
+
+  return auth?.currentUser?.email?.split("@")[0] || "Partner";
+}
+
+async function recordActivity(
+  scope: Scope,
+  type: ActivityItem["type"],
+  message: string,
+  targetId?: string
+) {
+  const actorName = await getCurrentActorName(scope);
+  const activityRef = doc(scopeCollection(scope, "activity"));
+  const createdAt = Date.now();
+
+  await setDoc(activityRef, {
+    id: activityRef.id,
+    type,
+    actorId: scope.userId,
+    actorName,
+    targetId: targetId ?? null,
+    message,
+    createdAt,
+    scopeId: scope.scopeId,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+function mapMoodFromData(data: Record<string, unknown>): MoodEntry | null {
+  const date = typeof data.date === "string" ? data.date : null;
+  const mood = typeof data.mood === "string" ? (data.mood as MoodOption) : null;
+  const updatedAt = typeof data.updatedAt === "number" ? data.updatedAt : null;
+  const isPartner = typeof data.isPartner === "boolean" ? data.isPartner : undefined;
+
+  if (!date || !mood || !updatedAt) return null;
+  return { date, mood, updatedAt, isPartner };
 }
 
 export async function saveUser(user: User) {
-  await setJson(KEYS.user, user);
+  const db = getFirebaseDb();
+  const auth = getFirebaseAuth();
+  const userId = auth?.currentUser?.uid;
+  if (!db || !userId) throw new Error("You must be signed in");
+
+  await setDoc(
+    doc(db, "users", userId),
+    {
+      id: user.id,
+      displayName: user.displayName,
+      partnerCode: user.partnerCode,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
 }
 
 export async function getUser(): Promise<User | null> {
-  return getJson<User | null>(KEYS.user, null);
+  const db = getFirebaseDb();
+  const auth = getFirebaseAuth();
+  const userId = auth?.currentUser?.uid;
+  if (!db || !userId) return null;
+
+  const snap = await getDoc(doc(db, "users", userId));
+  if (!snap.exists()) return null;
+
+  const data = snap.data() as Partial<User>;
+  if (!data.id || !data.displayName || !data.partnerCode) return null;
+
+  return {
+    id: data.id,
+    displayName: data.displayName,
+    partnerCode: data.partnerCode,
+  };
 }
 
 export async function setMood(mood: MoodOption, isPartner = false) {
-  const moods = await getJson<Record<string, MoodEntry>>(KEYS.moods, {});
+  if (isPartner) return;
+  const scope = await getScope();
   const date = todayKey();
   const entry: MoodEntry = { date, mood, isPartner, updatedAt: Date.now() };
-  moods[isPartner ? `partner-${date}` : date] = entry;
-  await setJson(KEYS.moods, moods);
+  const moodId = `${date}_${scope.userId}`;
+  await setDoc(doc(scopeCollection(scope, "moods"), moodId), {
+    ...entry,
+    userId: scope.userId,
+    scopeId: scope.scopeId,
+  });
+
+  await recordActivity(scope, "mood-updated", `Updated mood to ${mood}.`, moodId);
 }
 
 export async function getMood(date: string = todayKey(), isPartner = false): Promise<MoodEntry | null> {
-  const moods = await getJson<Record<string, MoodEntry>>(KEYS.moods, {});
-  const key = isPartner ? `partner-${date}` : date;
-  return moods[key] ?? null;
+  const scope = await getScope();
+
+  if (!isPartner) {
+    const moodId = `${date}_${scope.userId}`;
+    const snap = await getDoc(doc(scopeCollection(scope, "moods"), moodId));
+    if (!snap.exists()) return null;
+    return mapMoodFromData(snap.data() as Record<string, unknown>);
+  }
+
+  if (scope.basePath[0] !== "spaces") return null;
+
+  const moodQuery = query(scopeCollection(scope, "moods"), where("date", "==", date));
+  const moodSnaps = await getDocs(moodQuery);
+  const partnerDoc = moodSnaps.docs.find(d => (d.data() as { userId?: string }).userId !== scope.userId);
+  if (!partnerDoc) return null;
+  return mapMoodFromData(partnerDoc.data() as Record<string, unknown>);
 }
 
 export async function ensurePartnerMood(): Promise<MoodEntry | null> {
-  const existing = await getMood(todayKey(), true);
-  if (existing) return existing;
-  const fallback: MoodOption[] = ["joyful", "calm", "neutral", "anxious", "low"];
-  const pick = fallback[Math.floor(Math.random() * fallback.length)];
-  await setMood(pick, true);
   return getMood(todayKey(), true);
 }
 
 export async function saveSnapshot(uri: string): Promise<Snapshot> {
-  const snapshot: Snapshot = { id: todayKey(), uri, createdAt: Date.now() };
-  await setJson(KEYS.snapshot, snapshot);
+  const scope = await getScope();
+  const id = `${todayKey()}_${scope.userId}`;
+  const createdAt = Date.now();
+
+  let uploadedUri = uri;
+  const storage = getFirebaseStorage();
+  if (storage) {
+    const blob = await fetch(uri).then(res => res.blob());
+    const snapshotPath = `${scope.basePath.join("/")}/snapshots/${id}-${createdAt}.jpg`;
+    const snapshotRef = ref(storage, snapshotPath);
+    await uploadBytes(snapshotRef, blob);
+    uploadedUri = await getDownloadURL(snapshotRef);
+  }
+
+  const snapshot: Snapshot = { id, uri: uploadedUri, createdAt };
+  await setDoc(doc(scopeCollection(scope, "snapshots"), id), {
+    ...snapshot,
+    userId: scope.userId,
+    scopeId: scope.scopeId,
+    updatedAt: serverTimestamp(),
+  });
+
+  await recordActivity(scope, "snapshot-saved", "Saved a daily snapshot.", id);
+
   return snapshot;
 }
 
 export async function getTodaySnapshot(): Promise<Snapshot | null> {
-  const snap = await getJson<Snapshot | null>(KEYS.snapshot, null);
+  const scope = await getScope();
+  const id = `${todayKey()}_${scope.userId}`;
+  const snapDoc = await getDoc(doc(scopeCollection(scope, "snapshots"), id));
+  if (!snapDoc.exists()) return null;
+
+  const data = snapDoc.data() as Partial<Snapshot>;
+  const snap: Snapshot | null =
+    typeof data.id === "string" && typeof data.uri === "string" && typeof data.createdAt === "number"
+      ? { id: data.id, uri: data.uri, createdAt: data.createdAt }
+      : null;
+
   if (!snap) return null;
   const isExpired = Date.now() - snap.createdAt > DAY_MS;
-  const isToday = snap.id === todayKey();
+  const isToday = snap.id.startsWith(todayKey());
   if (isExpired || !isToday) {
-    await AsyncStorage.removeItem(KEYS.snapshot);
+    await deleteDoc(doc(scopeCollection(scope, "snapshots"), id));
     return null;
   }
   return snap;
 }
 
 export async function listEvents(): Promise<Event[]> {
-  const events = await getJson<Event[]>(KEYS.events, []);
+  const scope = await getScope();
+  const snaps = await getDocs(scopeCollection(scope, "events"));
+  const events = snaps.docs
+    .map(docSnap => docSnap.data() as Event)
+    .filter(event => typeof event.id === "string" && typeof event.title === "string" && typeof event.dateTime === "string");
+
   return [...events].sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime());
 }
 
 export async function saveEvent(event: Event) {
-  const events = await listEvents();
-  const idx = events.findIndex(e => e.id === event.id);
-  if (idx >= 0) {
-    events[idx] = event;
-  } else {
-    events.push(event);
-  }
-  await setJson(KEYS.events, events);
+  const scope = await getScope();
+  const eventId = event.id?.trim() || doc(scopeCollection(scope, "events")).id;
+  const updatedAt = Date.now();
+  const reminderWindows: ReminderWindow[] = event.reminderWindows?.length ? event.reminderWindows : [30, 120, 1440];
+
+  await setDoc(doc(scopeCollection(scope, "events"), eventId), {
+    ...event,
+    id: eventId,
+    reminderWindows,
+    updatedAt,
+    userId: scope.userId,
+    scopeId: scope.scopeId,
+    serverUpdatedAt: serverTimestamp(),
+  });
+
+  await recordActivity(scope, "event-saved", `Saved event: ${event.title || "Untitled"}.`, eventId);
+
+  return eventId;
+}
+
+export async function confirmEvent(eventId: string) {
+  const scope = await getScope();
+  const eventRef = doc(scopeCollection(scope, "events"), eventId);
+  const snap = await getDoc(eventRef);
+  if (!snap.exists()) throw new Error("Event not found");
+
+  const data = snap.data() as Event;
+  await setDoc(
+    eventRef,
+    {
+      ...data,
+      id: eventId,
+      confirmedAt: Date.now(),
+      userId: scope.userId,
+      scopeId: scope.scopeId,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
 }
 
 export async function deleteEvent(id: string) {
-  const events = await listEvents();
-  await setJson(KEYS.events, events.filter(e => e.id !== id));
+  const scope = await getScope();
+  await deleteDoc(doc(scopeCollection(scope, "events"), id));
 }
 
 export async function eventsWithinNext24h(): Promise<Event[]> {
@@ -107,19 +305,55 @@ export async function eventsWithinNext24h(): Promise<Event[]> {
   });
 }
 
+export async function listSmartReminders(): Promise<SmartReminder[]> {
+  const events = await listEvents();
+  const now = Date.now();
+
+  const reminders = events.flatMap(event => {
+    const eventTime = new Date(event.dateTime).getTime();
+    if (Number.isNaN(eventTime) || eventTime <= now) return [];
+
+    const windows = event.reminderWindows?.length ? event.reminderWindows : [30, 120, 1440];
+    return windows
+      .map(windowMinutes => {
+        const dueAt = eventTime - windowMinutes * 60 * 1000;
+        if (dueAt > now) return null;
+        const requiresGuardianFollowup =
+          !!event.guardianAlertEnabled &&
+          !event.confirmedAt &&
+          (event.category === "trip" || event.category === "date") &&
+          eventTime - now <= 2 * 60 * 60 * 1000;
+
+        return {
+          event,
+          windowMinutes: windowMinutes as ReminderWindow,
+          dueAt,
+          requiresGuardianFollowup,
+        } satisfies SmartReminder;
+      })
+      .filter((item): item is SmartReminder => !!item);
+  });
+
+  return reminders.sort((a, b) => b.dueAt - a.dueAt);
+}
+
 export async function listMemories(): Promise<Memory[]> {
-  return getJson<Memory[]>(KEYS.memories, []);
+  const scope = await getScope();
+  const snaps = await getDocs(scopeCollection(scope, "memories"));
+  return snaps.docs
+    .map(docSnap => docSnap.data() as Memory)
+    .filter(memory => typeof memory.id === "string" && typeof memory.title === "string")
+    .sort((a, b) => b.createdAt - a.createdAt);
 }
 
 export async function saveMemory(memory: Memory) {
-  const memories = await listMemories();
-  const idx = memories.findIndex(m => m.id === memory.id);
-  if (idx >= 0) {
-    memories[idx] = memory;
-  } else {
-    memories.push(memory);
-  }
-  await setJson(KEYS.memories, memories);
+  const scope = await getScope();
+  await setDoc(doc(scopeCollection(scope, "memories"), memory.id), {
+    ...memory,
+    userId: scope.userId,
+    scopeId: scope.scopeId,
+    updatedAt: serverTimestamp(),
+  });
 }
 
 export async function addMemoryFromSnapshot(snapshot: Snapshot) {
@@ -130,21 +364,246 @@ export async function addMemoryFromSnapshot(snapshot: Snapshot) {
     createdAt: snapshot.createdAt,
     type: "snapshot",
     snapshotUri: snapshot.uri,
+    tag: "trip",
   };
   await saveMemory(memory);
 }
 
-export async function addNoteMemory(title: string, description: string) {
+export async function addNoteMemory(title: string, description: string, tag: MemoryTag = "anniversary") {
+  const scope = await getScope();
+  const createdAt = Date.now();
   const memory: Memory = {
-    id: `note-${Date.now()}`,
+    id: doc(scopeCollection(scope, "memories")).id,
     title,
     description,
-    createdAt: Date.now(),
+    createdAt,
     type: "note",
+    tag,
   };
   await saveMemory(memory);
+}
+
+export async function getPartnerPresenceSummary(): Promise<PartnerPresence> {
+  const scope = await getScope();
+  if (scope.basePath[0] !== "spaces") {
+    return { moodUpdatedAt: null, snapshotSavedAt: null, eventUpdatedAt: null };
+  }
+
+  const [moodsSnap, snapshotsSnap, eventsSnap] = await Promise.all([
+    getDocs(scopeCollection(scope, "moods")),
+    getDocs(scopeCollection(scope, "snapshots")),
+    getDocs(scopeCollection(scope, "events")),
+  ]);
+
+  const partnerMood = moodsSnap.docs
+    .map(docSnap => docSnap.data() as { userId?: string; updatedAt?: number })
+    .filter(item => item.userId && item.userId !== scope.userId)
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+
+  const partnerSnapshot = snapshotsSnap.docs
+    .map(docSnap => docSnap.data() as { userId?: string; createdAt?: number })
+    .filter(item => item.userId && item.userId !== scope.userId)
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+
+  const partnerEvent = eventsSnap.docs
+    .map(docSnap => docSnap.data() as { userId?: string; updatedAt?: number })
+    .filter(item => item.userId && item.userId !== scope.userId)
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+
+  return {
+    moodUpdatedAt: partnerMood?.updatedAt ?? null,
+    snapshotSavedAt: partnerSnapshot?.createdAt ?? null,
+    eventUpdatedAt: partnerEvent?.updatedAt ?? null,
+  };
+}
+
+export async function getMoodStreakSummary(): Promise<MoodStreakSummary> {
+  const scope = await getScope();
+  const moods = await getDocs(scopeCollection(scope, "moods"));
+  const myDays = moods.docs
+    .map(docSnap => docSnap.data() as { userId?: string; date?: string })
+    .filter(item => item.userId === scope.userId && typeof item.date === "string")
+    .map(item => item.date as string);
+
+  const unique = Array.from(new Set(myDays));
+  const today = todayKey();
+  const sevenDaysAgo = Date.now() - 6 * DAY_MS;
+  const weeklyCheckins = unique.filter(day => {
+    const t = new Date(`${day}T00:00:00`).getTime();
+    return !Number.isNaN(t) && t >= sevenDaysAgo;
+  }).length;
+
+  let streakDays = 0;
+  let cursor = new Date(`${today}T00:00:00`).getTime();
+  const set = new Set(unique);
+
+  while (true) {
+    const key = new Date(cursor).toISOString().slice(0, 10);
+    if (!set.has(key)) break;
+    streakDays += 1;
+    cursor -= DAY_MS;
+  }
+
+  const missedToday = !set.has(today);
+  return { streakDays, weeklyCheckins, missedToday };
+}
+
+export async function getWeeklyPlan(): Promise<WeeklyPlanDay[]> {
+  const events = await listEvents();
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+
+  const days: WeeklyPlanDay[] = [];
+  for (let offset = 0; offset < 7; offset += 1) {
+    const day = new Date(now.getTime() + offset * DAY_MS);
+    const dayKey = day.toISOString().slice(0, 10);
+
+    const dayEvents = events.filter(evt => {
+      const ts = new Date(evt.dateTime).getTime();
+      if (Number.isNaN(ts)) return false;
+      const evtKey = new Date(ts).toISOString().slice(0, 10);
+      return evtKey === dayKey;
+    });
+
+    const conflicts: Array<{ firstEventId: string; secondEventId: string }> = [];
+    const sorted = [...dayEvents].sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime());
+    for (let i = 0; i < sorted.length - 1; i += 1) {
+      const first = sorted[i];
+      const second = sorted[i + 1];
+      const delta = Math.abs(new Date(second.dateTime).getTime() - new Date(first.dateTime).getTime());
+      if (delta <= 60 * 60 * 1000) {
+        conflicts.push({ firstEventId: first.id, secondEventId: second.id });
+      }
+    }
+
+    const hasEvening = sorted.some(evt => {
+      const h = new Date(evt.dateTime).getHours();
+      return h >= 18 && h <= 21;
+    });
+    const hasMorning = sorted.some(evt => {
+      const h = new Date(evt.dateTime).getHours();
+      return h >= 8 && h <= 11;
+    });
+
+    const suggestedBlocks: string[] = [];
+    if (!hasMorning) suggestedBlocks.push("08:30 - 09:30 Focus call");
+    if (!hasEvening) suggestedBlocks.push("19:00 - 20:00 Quality time");
+
+    days.push({ date: dayKey, events: sorted, suggestedBlocks, conflicts });
+  }
+
+  return days;
+}
+
+export async function listActivityFeed(limit = 20): Promise<ActivityItem[]> {
+  const scope = await getScope();
+  const snap = await getDocs(scopeCollection(scope, "activity"));
+  const items = snap.docs
+    .map(docSnap => docSnap.data() as ActivityItem)
+    .filter(item => typeof item.id === "string" && typeof item.createdAt === "number")
+    .sort((a, b) => b.createdAt - a.createdAt);
+
+  return items.slice(0, Math.max(1, limit));
+}
+
+export async function listCoupleGoals(): Promise<CoupleGoal[]> {
+  const scope = await getScope();
+  const snap = await getDocs(scopeCollection(scope, "goals"));
+  return snap.docs
+    .map(docSnap => docSnap.data() as CoupleGoal)
+    .filter(item => typeof item.id === "string" && typeof item.title === "string")
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+export async function upsertCoupleGoal(goal: Omit<CoupleGoal, "id" | "createdAt" | "updatedAt" | "completed"> & { id?: string }) {
+  const scope = await getScope();
+  const goalId = goal.id?.trim() || doc(scopeCollection(scope, "goals")).id;
+  const now = Date.now();
+  const next: CoupleGoal = {
+    id: goalId,
+    title: goal.title,
+    type: goal.type,
+    target: Math.max(1, goal.target),
+    progress: Math.max(0, goal.progress),
+    completed: goal.progress >= goal.target,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await setDoc(
+    doc(scopeCollection(scope, "goals"), goalId),
+    {
+      ...next,
+      userId: scope.userId,
+      scopeId: scope.scopeId,
+      serverUpdatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  return goalId;
+}
+
+export async function updateGoalProgress(goalId: string, progress: number) {
+  const scope = await getScope();
+  const ref = doc(scopeCollection(scope, "goals"), goalId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error("Goal not found");
+  const goal = snap.data() as CoupleGoal;
+  const nextProgress = Math.max(0, progress);
+
+  await setDoc(
+    ref,
+    {
+      ...goal,
+      progress: nextProgress,
+      completed: nextProgress >= goal.target,
+      updatedAt: Date.now(),
+      userId: scope.userId,
+      scopeId: scope.scopeId,
+      serverUpdatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
+}
+
+export async function getPartnerDisplayName(): Promise<string | null> {
+  const scope = await getScope();
+  if (scope.basePath[0] !== "spaces") return null;
+
+  const membersSnap = await getDocs(collection(scope.db!, `${scope.basePath.join("/")}/members`));
+  const partner = membersSnap.docs
+    .map(docSnap => docSnap.data() as { userId?: string; displayName?: string; email?: string })
+    .find(member => typeof member.userId === "string" && member.userId !== scope.userId);
+
+  if (!partner) return null;
+
+  if (typeof partner.displayName === "string" && partner.displayName.trim()) {
+    return partner.displayName.trim();
+  }
+
+  if (typeof partner.email === "string" && partner.email.includes("@")) {
+    return partner.email.split("@")[0] || null;
+  }
+
+  return "Partner";
 }
 
 export async function resetAll() {
-  await AsyncStorage.multiRemove(Object.values(KEYS));
+  const auth = getFirebaseAuth();
+  const userId = auth?.currentUser?.uid;
+
+  if (userId) {
+    const scope = await getScope();
+    const collectionNames = ["moods", "events", "memories", "snapshots"];
+
+    await Promise.all(
+      collectionNames.map(async name => {
+        const docs = await getDocs(scopeCollection(scope, name));
+        await Promise.all(docs.docs.map(item => deleteDoc(item.ref)));
+      })
+    );
+  }
+
+  await AsyncStorage.multiRemove([MODE_KEY, SPACE_KEY]);
 }

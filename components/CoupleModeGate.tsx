@@ -4,21 +4,23 @@ import { useNavigation } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSpace } from "../context/SpaceContext";
 import { ROUTES } from "../main/navigation/routes";
+import { useAppTheme } from "../context/ThemeContext";
 
 export function CoupleModeGate({ children }: { children: React.ReactNode }) {
   const { mode, activeSpaceId } = useSpace();
+  const { colors, isDark } = useAppTheme();
   const navigation = useNavigation();
 
   if (mode === "couple" && !activeSpaceId) {
     return (
-      <View style={styles.gate}>
-        <View style={styles.iconCircle}>
-          <Ionicons name="link-outline" size={22} color="#7C3AED" />
+      <View style={[styles.gate, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.iconCircle, { backgroundColor: isDark ? colors.surfaceAlt : "#EEF2FF" }]}>
+          <Ionicons name="link-outline" size={22} color={colors.primary} />
         </View>
-        <Text style={styles.title}>Pairing needed</Text>
-        <Text style={styles.subtitle}>You are in couple mode but no shared space is active. Create or join a space from Settings.</Text>
-        <TouchableOpacity style={styles.primaryButton} onPress={() => navigation.navigate(ROUTES.Settings as never)}>
-          <Text style={styles.primaryButtonText}>Go to Settings</Text>
+        <Text style={[styles.title, { color: colors.text }]}>Pairing needed</Text>
+        <Text style={[styles.subtitle, { color: colors.muted }]}>You are in couple mode but no shared space is active. Create or join a space from Settings.</Text>
+        <TouchableOpacity style={[styles.primaryButton, { backgroundColor: colors.primary }]} onPress={() => navigation.navigate(ROUTES.Spaces as never)}>
+          <Text style={styles.primaryButtonText}>Go to Spaces</Text>
         </TouchableOpacity>
       </View>
     );

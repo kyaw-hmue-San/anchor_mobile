@@ -14,60 +14,104 @@ import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons";
 import { AnchorLogo } from "../../components/AnchorLogo";
 import { MenuButton } from "../../components/MenuButton";
-import { MoodEntry, MoodOption, Snapshot } from "../../models/types";
-import { ensurePartnerMood, getMood, getTodaySnapshot, saveSnapshot, setMood } from "../../services/storage";
+import { ConnectionStatusBanner } from "../../components/ConnectionStatusBanner";
+import { ActivityItem, MoodEntry, MoodOption, MoodStreakSummary, PartnerPresence, Snapshot } from "../../models/types";
+import {
+  ensurePartnerMood,
+  getMood,
+  getMoodStreakSummary,
+  getPartnerDisplayName,
+  getPartnerPresenceSummary,
+  getTodaySnapshot,
+  listActivityFeed,
+  saveSnapshot,
+  setMood,
+} from "../../services/storage";
 import { CoupleModeGate } from "../../components/CoupleModeGate";
-const PLACEHOLDER_IMAGE = "https://placehold.co/600x400";
+import { getAppSettings } from "../../services/appSettings";
+import { useAppTheme } from "../../context/ThemeContext";
+import { getFriendlyFirebaseError } from "../../services/firebaseErrors";
 
 const MOODS: MoodOption[] = ["joyful", "calm", "neutral", "anxious", "low"];
 
 export function SanctuaryScreen() {
-  const [loading, setLoading] = useState(true);
+  const { colors, isDark } = useAppTheme();
+
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [savingMood, setSavingMood] = useState(false);
+  const [savingSnapshot, setSavingSnapshot] = useState(false);
   const [myMood, setMyMood] = useState<MoodEntry | null>(null);
   const [partnerMood, setPartnerMoodState] = useState<MoodEntry | null>(null);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [partnerName, setPartnerName] = useState("Partner");
+  const [shareLocationEnabled, setShareLocationEnabled] = useState(false);
+  const [locationUpdatesEnabled, setLocationUpdatesEnabled] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const partnerName = "Partner";
-  const lastLocation = "Coffee Shop, Downtown";
-  const lastLocationAgo = "Updated 1 hour ago";
+  const [presence, setPresence] = useState<PartnerPresence>({ moodUpdatedAt: null, snapshotSavedAt: null, eventUpdatedAt: null });
+  const [streak, setStreak] = useState<MoodStreakSummary>({ streakDays: 0, weeklyCheckins: 0, missedToday: false });
+  const [feed, setFeed] = useState<ActivityItem[]>([]);
+
+  const loadSanctuaryState = async () => {
+    setInitialLoading(true);
+    setError(null);
+    try {
+      const [mine, partner, snap, partnerDisplayName, appSettings] = await Promise.all([
+        getMood(),
+        ensurePartnerMood(),
+        getTodaySnapshot(),
+        getPartnerDisplayName(),
+        getAppSettings(),
+      ]);
+      const [presenceSummary, streakSummary, activity] = await Promise.all([
+        getPartnerPresenceSummary(),
+        getMoodStreakSummary(),
+        listActivityFeed(10),
+      ]);
+      setMyMood(mine);
+      setPartnerMoodState(partner);
+      setSnapshot(snap);
+      setPartnerName(partnerDisplayName?.trim() || "Partner");
+      setShareLocationEnabled(appSettings.shareLocation);
+      setLocationUpdatesEnabled(appSettings.locationUpdates);
+      setPresence(presenceSummary);
+      setStreak(streakSummary);
+      setFeed(activity);
+    } catch (error) {
+      setError(getFriendlyFirebaseError(error, "Failed to load sanctuary state."));
+    } finally {
+      setInitialLoading(false);
+    }
+  };
 
   useEffect(() => {
-    let isMounted = true;
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const [mine, partner, snap] = await Promise.all([getMood(), ensurePartnerMood(), getTodaySnapshot()]);
-        if (!isMounted) return;
-        setMyMood(mine);
-        setPartnerMoodState(partner);
-        setSnapshot(snap);
-      } catch {
-        setError("Failed to load sanctuary state.");
-      } finally {
-        if (isMounted) setLoading(false);
-      }
-    };
-    load();
-    return () => {
-      isMounted = false;
-    };
+    loadSanctuaryState();
   }, []);
 
+  const onRetrySync = async () => {
+    await loadSanctuaryState();
+  };
+
   const handleMoodSelect = async (mood: MoodOption) => {
-    setLoading(true);
+    if (savingMood || savingSnapshot) return;
+
+    setSavingMood(true);
+    setError(null);
     try {
       await setMood(mood);
-      const updated = await getMood();
+      const [updated, streakSummary, activity] = await Promise.all([getMood(), getMoodStreakSummary(), listActivityFeed(10)]);
       setMyMood(updated);
-    } catch {
-      setError("Could not save mood.");
+      setStreak(streakSummary);
+      setFeed(activity);
+    } catch (error) {
+      setError(getFriendlyFirebaseError(error, "Could not save mood."));
     } finally {
-      setLoading(false);
+      setSavingMood(false);
     }
   };
 
   const pickImage = async () => {
+    if (savingMood || savingSnapshot) return;
+
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
       Alert.alert("Permission required", "Allow photo access to add a snapshot.");
@@ -79,118 +123,182 @@ export function SanctuaryScreen() {
     });
     if (result.canceled || !result.assets?.length) return;
     const uri = result.assets[0].uri;
-    setLoading(true);
+
+    setSavingSnapshot(true);
+    setError(null);
     try {
       const snap = await saveSnapshot(uri);
+      const [presenceSummary, activity] = await Promise.all([getPartnerPresenceSummary(), listActivityFeed(10)]);
       setSnapshot(snap);
-    } catch {
-      setError("Could not save snapshot.");
+      setPresence(presenceSummary);
+      setFeed(activity);
+    } catch (error) {
+      setError(getFriendlyFirebaseError(error, "Could not save snapshot."));
     } finally {
-      setLoading(false);
+      setSavingSnapshot(false);
     }
   };
 
-  if (loading) {
+  if (initialLoading) {
     return (
-      <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={["top", "left", "right"]}>
         <View style={styles.centered}>
-          <ActivityIndicator size="small" color={palette.primary} />
+          <ActivityIndicator size="small" color={colors.primary} />
         </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={["top", "left", "right"]}>
       <CoupleModeGate>
-        <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        <ScrollView style={[styles.screen, { backgroundColor: colors.background }]} contentContainerStyle={styles.content}>
+          {error ? (
+            <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Text style={[styles.errorText, { color: colors.danger }]}>{error}</Text>
+              <TouchableOpacity style={[styles.primaryButton, { backgroundColor: colors.primary }]} onPress={onRetrySync}>
+                <Text style={styles.primaryButtonText}>Retry sync</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
 
           <View style={styles.topBar}>
             <AnchorLogo size={35} />
-            <MenuButton color={palette.text} />
+            <MenuButton color={colors.text} />
           </View>
 
-          <View style={styles.heroCard}>
-            <Text style={styles.screenTitle}>Sanctuary</Text>
-            <Text style={styles.screenSubtitle}>Your connection to {partnerName}</Text>
+          <ConnectionStatusBanner />
 
-            <View style={styles.heroInner}>
+          <View style={[styles.heroCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.screenTitle, { color: colors.text }]}>Sanctuary</Text>
+            <Text style={[styles.screenSubtitle, { color: colors.muted }]}>Your connection to {partnerName}</Text>
+
+            <View style={[styles.heroInner, { backgroundColor: isDark ? "#4338CA" : "#C084FC" }]}>
               <Text style={styles.heroName}>{partnerName}</Text>
               <Text style={styles.heroTagline}>Always with you</Text>
             </View>
           </View>
 
           <View style={styles.cardGroup}>
-            <Text style={styles.sectionLabel}>Current mood</Text>
-            <View style={styles.moodCard}>
-              <View style={styles.moodIconWrap}>
-                <Ionicons name="book-outline" size={22} color="#7C3AED" />
+            <Text style={[styles.sectionLabel, { color: colors.muted }]}>Current mood</Text>
+            <View style={[styles.moodCard, { borderColor: colors.border, backgroundColor: isDark ? colors.surfaceAlt : "#F6EDFF" }] }>
+              <View style={[styles.moodIconWrap, { backgroundColor: colors.primarySoft }]}>
+                <Ionicons name="book-outline" size={22} color={colors.primary} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.moodTitle}>{partnerMood?.mood ?? "Waiting for partner"}</Text>
-                <Text style={styles.mutedText}>
+                <Text style={[styles.moodTitle, { color: colors.text }]}>{partnerMood?.mood ?? "Waiting for partner"}</Text>
+                <Text style={[styles.mutedText, { color: colors.muted }]}>
                   {partnerMood?.updatedAt ? new Date(partnerMood.updatedAt).toLocaleTimeString() : "No recent mood"}
                 </Text>
               </View>
             </View>
           </View>
 
+          <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
+            <Text style={[styles.cardTitle, { color: colors.text }]}>Partner Presence Timeline</Text>
+            <Text style={[styles.mutedText, { color: colors.muted }]}>Mood update: {presence.moodUpdatedAt ? new Date(presence.moodUpdatedAt).toLocaleString() : "No update yet"}</Text>
+            <Text style={[styles.mutedText, { color: colors.muted }]}>Snapshot: {presence.snapshotSavedAt ? new Date(presence.snapshotSavedAt).toLocaleString() : "No snapshot yet"}</Text>
+            <Text style={[styles.mutedText, { color: colors.muted }]}>Event activity: {presence.eventUpdatedAt ? new Date(presence.eventUpdatedAt).toLocaleString() : "No event activity yet"}</Text>
+          </View>
+
+          <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
+            <Text style={[styles.cardTitle, { color: colors.text }]}>Daily Check-in Streak</Text>
+            <Text style={[styles.mutedText, { color: colors.text }]}>Streak: {streak.streakDays} day(s)</Text>
+            <Text style={[styles.mutedText, { color: colors.text }]}>This week: {streak.weeklyCheckins} check-ins</Text>
+            {streak.missedToday ? <Text style={[styles.mutedText, { color: colors.danger }]}>Gentle nudge: check in today 💜</Text> : null}
+          </View>
+
           <View style={styles.cardGroup}>
-            <Text style={styles.sectionLabel}>Last known location</Text>
-            <View style={[styles.moodCard, { backgroundColor: "#EEF6FF", borderColor: "#DBEAFE" }]}>
-              <View style={styles.moodIconWrapBlue}>
+            <Text style={[styles.sectionLabel, { color: colors.muted }]}>Last known location</Text>
+            <View style={[styles.moodCard, { backgroundColor: isDark ? "#1E3A8A" : "#EEF6FF", borderColor: isDark ? "#1D4ED8" : "#DBEAFE" }]}>
+              <View style={[styles.moodIconWrapBlue, { backgroundColor: isDark ? "#1E40AF" : "#DBEAFE" }]}>
                 <Ionicons name="location-outline" size={20} color="#2563EB" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.locationTitle}>{lastLocation}</Text>
+                <Text style={[styles.locationTitle, { color: colors.text }]}>
+                  {shareLocationEnabled ? "No location shared yet" : "Location sharing is turned off"}
+                </Text>
                 <View style={styles.rowCenter}>
-                  <Ionicons name="time-outline" size={14} color={palette.muted} />
-                  <Text style={[styles.mutedText, { marginLeft: 6 }]}>{lastLocationAgo}</Text>
+                  <Ionicons name="time-outline" size={14} color={colors.muted} />
+                  <Text style={[styles.mutedText, { marginLeft: 6, color: colors.muted }]}>
+                    {shareLocationEnabled
+                      ? locationUpdatesEnabled
+                        ? "Waiting for location updates"
+                        : "Location updates are disabled in Settings"
+                      : "Enable Share Location in Settings"}
+                  </Text>
                 </View>
               </View>
             </View>
           </View>
 
-          <View style={styles.card}>
+          <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <View style={styles.cardHeaderRow}>
               <View>
-                <Text style={styles.cardTitle}>Your mood today</Text>
-                <Text style={styles.mutedText}>{myMood?.mood ?? "Not set"}</Text>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Your mood today</Text>
+                <Text style={[styles.mutedText, { color: colors.muted }]}>{myMood?.mood ?? "Not set"}</Text>
               </View>
-              <Ionicons name="pulse-outline" size={20} color={palette.primary} />
+              <Ionicons name="pulse-outline" size={20} color={colors.primary} />
             </View>
             <View style={styles.moodRow}>
               {MOODS.map(mood => (
                 <TouchableOpacity
                   key={mood}
                   onPress={() => handleMoodSelect(mood)}
+                  disabled={savingMood || savingSnapshot}
                   style={[
                     styles.moodPill,
-                    myMood?.mood === mood && { backgroundColor: palette.primarySoft, borderColor: palette.primary },
+                    { borderColor: colors.border, backgroundColor: colors.surfaceAlt },
+                    myMood?.mood === mood && { backgroundColor: colors.primarySoft, borderColor: colors.primary },
+                    (savingMood || savingSnapshot) && styles.disabledButton,
                   ]}
                 >
-                  <Text style={styles.moodPillText}>{mood}</Text>
+                  <Text style={[styles.moodPillText, { color: colors.text }]}>{mood}</Text>
                 </TouchableOpacity>
               ))}
             </View>
+            {savingMood ? <Text style={[styles.mutedText, { color: colors.muted }]}>Saving mood...</Text> : null}
           </View>
 
-          <View style={styles.card}>
+          <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <View style={styles.cardHeaderRow}>
               <View>
-                <Text style={styles.cardTitle}>Daily snapshot</Text>
-                <Text style={styles.mutedText}>One photo per day, expires in 24h</Text>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Daily snapshot</Text>
+                <Text style={[styles.mutedText, { color: colors.muted }]}>One photo per day, expires in 24h</Text>
               </View>
-              <Ionicons name="image-outline" size={20} color={palette.primary} />
+              <Ionicons name="image-outline" size={20} color={colors.primary} />
             </View>
 
-            <Image source={{ uri: snapshot?.uri || PLACEHOLDER_IMAGE }} style={styles.snapshot} resizeMode="cover" />
+            {snapshot?.uri ? (
+              <Image source={{ uri: snapshot.uri }} style={styles.snapshot} resizeMode="cover" />
+            ) : (
+              <View style={[styles.snapshotPlaceholder, { borderColor: colors.border, backgroundColor: colors.surfaceAlt }]}>
+                <Text style={[styles.mutedText, { color: colors.muted }]}>No snapshot uploaded today.</Text>
+              </View>
+            )}
 
-            <TouchableOpacity style={styles.primaryButton} onPress={pickImage}>
+            <TouchableOpacity
+              style={[styles.primaryButton, { backgroundColor: colors.primary }, (savingMood || savingSnapshot) && styles.disabledButton]}
+              onPress={pickImage}
+              disabled={savingMood || savingSnapshot}
+            >
               <Ionicons name="add" size={18} color="white" />
-              <Text style={styles.primaryButtonText}>Add / Replace snapshot</Text>
+              <Text style={styles.primaryButtonText}>{savingSnapshot ? "Saving snapshot..." : "Add / Replace snapshot"}</Text>
             </TouchableOpacity>
+          </View>
+
+          <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
+            <Text style={[styles.cardTitle, { color: colors.text }]}>Activity Feed</Text>
+            {feed.length === 0 ? (
+              <Text style={[styles.mutedText, { color: colors.muted }]}>No recent activity.</Text>
+            ) : (
+              feed.map(item => (
+                <View key={item.id} style={styles.feedRow}>
+                  <Text style={[styles.mutedText, { color: colors.text, flex: 1 }]}>{item.actorName}: {item.message}</Text>
+                  <Text style={[styles.mutedText, { color: colors.muted }]}>{new Date(item.createdAt).toLocaleTimeString()}</Text>
+                </View>
+              ))
+            )}
           </View>
         </ScrollView>
       </CoupleModeGate>
@@ -318,4 +426,6 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   primaryButtonText: { color: "white", fontWeight: "700" },
+  disabledButton: { opacity: 0.6 },
+  feedRow: { flexDirection: "row", alignItems: "center", gap: 8 },
 });

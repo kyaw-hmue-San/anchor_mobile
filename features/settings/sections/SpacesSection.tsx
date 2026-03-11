@@ -1,5 +1,6 @@
 import React from "react";
 import { View, Text, TextInput, TouchableOpacity, StyleSheet } from "react-native";
+import { useAppTheme } from "../../../context/ThemeContext";
 
 type Props = {
   mode: "solo" | "couple";
@@ -20,6 +21,8 @@ type Props = {
 };
 
 export function SpacesSection(props: Props) {
+  const { colors } = useAppTheme();
+
   const {
     mode,
     activeSpaceId,
@@ -39,17 +42,26 @@ export function SpacesSection(props: Props) {
   } = props;
 
   return (
-    <View style={styles.card}>
-      <Text style={styles.cardTitle}>Spaces</Text>
-      <Text style={styles.muted}>Mode: {mode === "couple" ? "Couple (shared space)" : "Solo (local only)"}</Text>
-      <Text style={styles.muted}>Active space: {activeSpaceId ?? "None"}</Text>
+    <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <Text style={[styles.cardTitle, { color: colors.text }]}>Spaces</Text>
+      <Text style={[styles.muted, { color: colors.muted }]}>Mode: {mode === "couple" ? "Couple (shared space)" : "Solo (local only)"}</Text>
+      <Text style={[styles.muted, { color: colors.muted }]}>Active space: {activeSpaceId ?? "None"}</Text>
+      {!userId ? <Text style={styles.warningText}>Sign in to create or join shared spaces.</Text> : null}
 
       <View style={styles.modeRow}>
-        <TouchableOpacity style={[styles.modeButton, mode === "solo" && styles.modeButtonActive]} onPress={onSolo} disabled={spaceLoading}>
-          <Text style={[styles.modeButtonText, mode === "solo" && styles.modeButtonTextActive]}>Solo</Text>
+        <TouchableOpacity
+          style={[styles.modeButton, { borderColor: colors.border, backgroundColor: colors.surface }, mode === "solo" && styles.modeButtonActive, spaceLoading && styles.disabledButton]}
+          onPress={onSolo}
+          disabled={spaceLoading}
+        >
+          <Text style={[styles.modeButtonText, { color: colors.text }, mode === "solo" && styles.modeButtonTextActive]}>Solo</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.modeButton, mode === "couple" && styles.modeButtonActive]} onPress={onCoupleHint} disabled={spaceLoading}>
-          <Text style={[styles.modeButtonText, mode === "couple" && styles.modeButtonTextActive]}>Couple</Text>
+        <TouchableOpacity
+          style={[styles.modeButton, { borderColor: colors.border, backgroundColor: colors.surface }, mode === "couple" && styles.modeButtonActive, spaceLoading && styles.disabledButton]}
+          onPress={onCoupleHint}
+          disabled={spaceLoading}
+        >
+          <Text style={[styles.modeButtonText, { color: colors.text }, mode === "couple" && styles.modeButtonTextActive]}>Couple</Text>
         </TouchableOpacity>
       </View>
 
@@ -57,10 +69,15 @@ export function SpacesSection(props: Props) {
         placeholder="Space name"
         value={spaceName}
         onChangeText={setSpaceName}
-        style={styles.input}
-        placeholderTextColor="#6B7280"
+        style={[styles.input, { borderColor: colors.border, backgroundColor: colors.surface, color: colors.text }]}
+        placeholderTextColor={colors.muted}
+        editable={!spaceLoading}
       />
-      <TouchableOpacity style={styles.primaryButton} onPress={onCreateSpace} disabled={spaceLoading || !userId}>
+      <TouchableOpacity
+        style={[styles.primaryButton, { backgroundColor: colors.primary }, spaceLoading && styles.disabledButton]}
+        onPress={onCreateSpace}
+        disabled={spaceLoading}
+      >
         <Text style={styles.primaryButtonText}>Create space</Text>
       </TouchableOpacity>
 
@@ -68,19 +85,28 @@ export function SpacesSection(props: Props) {
         placeholder="Pairing code"
         value={joinCode}
         onChangeText={setJoinCode}
-        style={styles.input}
-        placeholderTextColor="#6B7280"
+        style={[styles.input, { borderColor: colors.border, backgroundColor: colors.surface, color: colors.text }]}
+        placeholderTextColor={colors.muted}
+        editable={!spaceLoading}
       />
-      <TouchableOpacity style={styles.primaryButton} onPress={onJoinSpace} disabled={spaceLoading || !userId}>
+      <TouchableOpacity
+        style={[styles.primaryButton, { backgroundColor: colors.primary }, spaceLoading && styles.disabledButton]}
+        onPress={onJoinSpace}
+        disabled={spaceLoading}
+      >
         <Text style={styles.primaryButtonText}>Join space</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.secondaryButton} onPress={onGenerateCode} disabled={!activeSpaceId || spaceLoading}>
-        <Text style={styles.secondaryButtonText}>Generate pairing code</Text>
+      <TouchableOpacity
+        style={[styles.secondaryButton, { borderColor: colors.border, backgroundColor: colors.surface }, (!activeSpaceId || spaceLoading) && styles.disabledButton]}
+        onPress={onGenerateCode}
+        disabled={!activeSpaceId || spaceLoading}
+      >
+        <Text style={[styles.secondaryButtonText, { color: colors.text }]}>Generate pairing code</Text>
       </TouchableOpacity>
 
-      {lastCode ? <Text style={styles.codeBadge}>Share code: {lastCode}</Text> : null}
-      {statusMsg ? <Text style={styles.statusText}>{statusMsg}</Text> : null}
+      {lastCode ? <Text style={[styles.codeBadge, { color: colors.text }]}>Share code: {lastCode}</Text> : null}
+      {statusMsg ? <Text style={[styles.statusText, { color: colors.muted }]}>{statusMsg}</Text> : null}
     </View>
   );
 }
@@ -96,6 +122,7 @@ const styles = StyleSheet.create({
   },
   cardTitle: { fontSize: 16, fontWeight: "700", color: "#111827" },
   muted: { color: "#6B7280" },
+  warningText: { color: "#92400E", fontWeight: "600" },
   modeRow: { flexDirection: "row", gap: 8, alignItems: "center" },
   modeButton: {
     flex: 1,
@@ -108,7 +135,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFF",
   },
   modeButtonActive: { backgroundColor: "#F3E8FF", borderColor: "#7C3AED" },
-  modeButtonText: { color: "#111827", fontWeight: "700" },
+  modeButtonText: { fontWeight: "700" },
   modeButtonTextActive: { color: "#7C3AED" },
   input: {
     borderWidth: 1,
@@ -139,4 +166,5 @@ const styles = StyleSheet.create({
   secondaryButtonText: { color: "#111827", fontWeight: "700" },
   codeBadge: { marginTop: 6, color: "#111827", fontWeight: "700" },
   statusText: { marginTop: 4, color: "#6B7280" },
+  disabledButton: { opacity: 0.55 },
 });

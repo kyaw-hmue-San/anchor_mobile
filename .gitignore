@@ -46,3 +46,6 @@ yarn-error.*
 
 # generated web output not used by firebase hosting (uses dist/)
 public/
+
+
+.env
