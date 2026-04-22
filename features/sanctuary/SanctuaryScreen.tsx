@@ -11,19 +11,22 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
+import * as Location from "expo-location";
 import { Ionicons } from "@expo/vector-icons";
 import { AnchorLogo } from "../../components/AnchorLogo";
 import { MenuButton } from "../../components/MenuButton";
 import { ConnectionStatusBanner } from "../../components/ConnectionStatusBanner";
-import { ActivityItem, MoodEntry, MoodOption, MoodStreakSummary, PartnerPresence, Snapshot } from "../../models/types";
+import { ActivityItem, MoodEntry, MoodOption, MoodStreakSummary, PartnerPresence, SharedLocation, Snapshot } from "../../models/types";
 import {
   ensurePartnerMood,
   getMood,
   getMoodStreakSummary,
   getPartnerDisplayName,
+  getPartnerLocation,
   getPartnerPresenceSummary,
   getTodaySnapshot,
   listActivityFeed,
+  saveMyLocation,
   saveSnapshot,
   setMood,
 } from "../../services/storage";
@@ -31,6 +34,8 @@ import { CoupleModeGate } from "../../components/CoupleModeGate";
 import { getAppSettings } from "../../services/appSettings";
 import { useAppTheme } from "../../context/ThemeContext";
 import { getFriendlyFirebaseError } from "../../services/firebaseErrors";
+import { ensureLocationPermission } from "../../services/permissions";
+import { PartnerLocationMap } from "./components/PartnerLocationMap";
 
 const MOODS: MoodOption[] = ["joyful", "calm", "neutral", "anxious", "low"];
 
@@ -46,6 +51,8 @@ export function SanctuaryScreen() {
   const [partnerName, setPartnerName] = useState("Partner");
   const [shareLocationEnabled, setShareLocationEnabled] = useState(false);
   const [locationUpdatesEnabled, setLocationUpdatesEnabled] = useState(true);
+  const [partnerLocation, setPartnerLocation] = useState<SharedLocation | null>(null);
+  const [sharingLocation, setSharingLocation] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [presence, setPresence] = useState<PartnerPresence>({ moodUpdatedAt: null, snapshotSavedAt: null, eventUpdatedAt: null });
   const [streak, setStreak] = useState<MoodStreakSummary>({ streakDays: 0, weeklyCheckins: 0, missedToday: false });
@@ -62,10 +69,11 @@ export function SanctuaryScreen() {
         getPartnerDisplayName(),
         getAppSettings(),
       ]);
-      const [presenceSummary, streakSummary, activity] = await Promise.all([
+      const [presenceSummary, streakSummary, activity, latestPartnerLocation] = await Promise.all([
         getPartnerPresenceSummary(),
         getMoodStreakSummary(),
         listActivityFeed(10),
+        getPartnerLocation(),
       ]);
       setMyMood(mine);
       setPartnerMoodState(partner);
@@ -76,6 +84,7 @@ export function SanctuaryScreen() {
       setPresence(presenceSummary);
       setStreak(streakSummary);
       setFeed(activity);
+      setPartnerLocation(latestPartnerLocation);
     } catch (error) {
       setError(getFriendlyFirebaseError(error, "Failed to load sanctuary state."));
     } finally {
@@ -136,6 +145,42 @@ export function SanctuaryScreen() {
       setError(getFriendlyFirebaseError(error, "Could not save snapshot."));
     } finally {
       setSavingSnapshot(false);
+    }
+  };
+
+  const shareCurrentLocation = async () => {
+    if (sharingLocation || savingMood || savingSnapshot) return;
+    if (!shareLocationEnabled) {
+      setError("Turn on Share Location in Settings first.");
+      return;
+    }
+
+    setSharingLocation(true);
+    setError(null);
+
+    try {
+      const perm = await ensureLocationPermission();
+      if (!perm.granted) {
+        setError(perm.message || "Location permission is required.");
+        return;
+      }
+
+      const current = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+
+      await saveMyLocation(
+        current.coords.latitude,
+        current.coords.longitude,
+        typeof current.coords.accuracy === "number" ? current.coords.accuracy : null
+      );
+
+      const latestPartnerLocation = await getPartnerLocation();
+      setPartnerLocation(latestPartnerLocation);
+    } catch (error) {
+      setError(getFriendlyFirebaseError(error, "Could not share your current location."));
+    } finally {
+      setSharingLocation(false);
     }
   };
 
@@ -216,18 +261,42 @@ export function SanctuaryScreen() {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.locationTitle, { color: colors.text }]}>
-                  {shareLocationEnabled ? "No location shared yet" : "Location sharing is turned off"}
+                  {shareLocationEnabled
+                    ? partnerLocation
+                      ? "Partner location received"
+                      : "No location shared yet"
+                    : "Location sharing is turned off"}
                 </Text>
                 <View style={styles.rowCenter}>
                   <Ionicons name="time-outline" size={14} color={colors.muted} />
                   <Text style={[styles.mutedText, { marginLeft: 6, color: colors.muted }]}>
                     {shareLocationEnabled
                       ? locationUpdatesEnabled
-                        ? "Waiting for location updates"
+                        ? partnerLocation
+                          ? `Updated ${new Date(partnerLocation.updatedAt).toLocaleTimeString()}`
+                          : "Waiting for location updates"
                         : "Location updates are disabled in Settings"
                       : "Enable Share Location in Settings"}
                   </Text>
                 </View>
+
+                {partnerLocation ? (
+                  <PartnerLocationMap
+                    latitude={partnerLocation.latitude}
+                    longitude={partnerLocation.longitude}
+                    partnerName={partnerName}
+                  />
+                ) : null}
+
+                <TouchableOpacity
+                  style={[styles.secondaryAction, { borderColor: colors.border }, sharingLocation && styles.disabledButton]}
+                  onPress={shareCurrentLocation}
+                  disabled={sharingLocation}
+                >
+                  <Text style={[styles.mutedText, { color: colors.text }]}>
+                    {sharingLocation ? "Sharing location..." : "Share my current location"}
+                  </Text>
+                </TouchableOpacity>
               </View>
             </View>
           </View>
@@ -428,4 +497,13 @@ const styles = StyleSheet.create({
   primaryButtonText: { color: "white", fontWeight: "700" },
   disabledButton: { opacity: 0.6 },
   feedRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  secondaryAction: {
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    minHeight: 34,
+    justifyContent: "center",
+    marginTop: 10,
+  },
 });

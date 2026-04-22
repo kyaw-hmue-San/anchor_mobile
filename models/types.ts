@@ -81,6 +81,14 @@ export interface PartnerPresence {
   eventUpdatedAt: number | null;
 }
 
+export interface SharedLocation {
+  userId: string;
+  latitude: number;
+  longitude: number;
+  accuracy?: number | null;
+  updatedAt: number;
+}
+
 export interface MoodStreakSummary {
   streakDays: number;
   weeklyCheckins: number;

@@ -9,6 +9,18 @@ import { AppSettings, defaultSettings } from "./types";
 import { getAppSettings, saveAppSettings } from "../../services/appSettings";
 import { useAppTheme } from "../../context/ThemeContext";
 import { ROUTES } from "../../main/navigation/routes";
+import { getFriendlyFirebaseError } from "../../services/firebaseErrors";
+import { ensureLocationPermission, ensureNotificationPermission } from "../../services/permissions";
+
+const NOTIFICATION_KEYS: (keyof AppSettings)[] = [
+  "enableNotifications",
+  "messageNotifications",
+  "countdownReminders",
+  "guardianAlerts",
+  "locationUpdates",
+];
+
+const LOCATION_KEYS: (keyof AppSettings)[] = ["shareLocation", "locationUpdates"];
 
 export function SettingsScreen() {
   const navigation = useNavigation();
@@ -25,8 +37,8 @@ export function SettingsScreen() {
       try {
         const next = await getAppSettings();
         setSettings(next);
-      } catch {
-        setError("Could not load settings.");
+      } catch (error) {
+        setError(getFriendlyFirebaseError(error, "Could not load settings."));
       } finally {
         setLoading(false);
       }
@@ -40,19 +52,50 @@ export function SettingsScreen() {
     try {
       const saved = await saveAppSettings(next);
       setSettings(saved);
-    } catch {
-      setError("Could not save settings.");
+    } catch (error) {
+      setError(getFriendlyFirebaseError(error, "Could not save settings."));
     } finally {
       setSaving(false);
     }
   };
 
-  const toggle = (key: keyof AppSettings) => {
+  const toggle = async (key: keyof AppSettings) => {
+    if (saving || loading) return;
+
+    const nextValue = !settings[key];
     const next = { ...settings, [key]: !settings[key] };
-    if (key === "darkMode") {
-      setDarkModeEnabled(next.darkMode);
+
+    if (nextValue && NOTIFICATION_KEYS.includes(key)) {
+      try {
+        const permission = await ensureNotificationPermission();
+        if (!permission.granted) {
+          setError(permission.message || "Notification permission is required for this setting.");
+          return;
+        }
+      } catch {
+        setError("Could not verify notification permission.");
+        return;
+      }
     }
-    persistSettings(next);
+
+    if (nextValue && LOCATION_KEYS.includes(key)) {
+      try {
+        const permission = await ensureLocationPermission();
+        if (!permission.granted) {
+          setError(permission.message || "Location permission is required for this setting.");
+          return;
+        }
+      } catch {
+        setError("Could not verify location permission.");
+        return;
+      }
+    }
+
+    if (key === "darkMode") {
+      await setDarkModeEnabled(next.darkMode);
+    }
+
+    await persistSettings(next);
   };
 
   return (

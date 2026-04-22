@@ -7,7 +7,7 @@ import { useAppTheme } from "../../../context/ThemeContext";
 
 type Props = {
   settings: AppSettings;
-  toggle: (key: keyof AppSettings) => void;
+  toggle: (key: keyof AppSettings) => void | Promise<void>;
   saving?: boolean;
 };
 

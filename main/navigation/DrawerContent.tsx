@@ -10,16 +10,16 @@ type Props = DrawerContentComponentProps & {
 };
 
 export function DrawerContent(props: Props) {
-  const { session, mode, activeSpaceId, spaceMemberCount } = useSpace();
+  const { session, activeSpaceId, spaceMemberCount } = useSpace();
   const { colors, isDark } = useAppTheme();
 
   return (
     <DrawerContentScrollView {...props} contentContainerStyle={[styles.scrollContent, { backgroundColor: colors.surface }] }>
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <Text style={[styles.title, { color: colors.text }]}>Anchor</Text>
-        <Text style={[styles.email, { color: colors.muted }]}>{session?.user?.email ?? "Solo mode"}</Text>
+        <Text style={[styles.email, { color: colors.muted }]}>{session?.user?.email ?? "Not signed in"}</Text>
         <Text style={[styles.meta, { color: colors.muted }]}>
-          {mode === "solo" ? "Mode: Solo" : `Mode: Couple • members: ${spaceMemberCount}${activeSpaceId ? ` • ${activeSpaceId}` : ""}`}
+          {`Mode: Couple • members: ${spaceMemberCount}${activeSpaceId ? ` • ${activeSpaceId}` : ""}`}
         </Text>
       </View>
 

@@ -7,8 +7,8 @@ import { useAppTheme } from "../../context/ThemeContext";
 
 export function AuthScreen() {
   const navigation = useNavigation();
-  const { session, loading, signIn, signUp, setSoloMode } = useSpace();
-  const { colors, isDark } = useAppTheme();
+  const { session, loading, signIn, signUp } = useSpace();
+  const { colors } = useAppTheme();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSignUp, setIsSignUp] = useState(false);
@@ -39,15 +39,6 @@ export function AuthScreen() {
       setStatus(isSignUp ? "Account created. Redirecting…" : "Signed in. Redirecting…");
       navigation.reset({ index: 0, routes: [{ name: ROUTES.Landing as never }] });
     }
-    setPending(false);
-  };
-
-  const handleSolo = async () => {
-    setPending(true);
-    setError(null);
-    setStatus("Solo mode enabled.");
-    await setSoloMode();
-    navigation.navigate(ROUTES.MainTabs as never);
     setPending(false);
   };
 
@@ -95,10 +86,6 @@ export function AuthScreen() {
       <TouchableOpacity style={[styles.primaryButton, { backgroundColor: colors.primary }]} onPress={handleSubmit} disabled={pending || loading}>
         {pending ? <ActivityIndicator color="white" /> : <Text style={styles.primaryButtonText}>{isSignUp ? "Create account" : "Sign in"}</Text>}
       </TouchableOpacity>
-
-      <TouchableOpacity style={[styles.secondaryButton, { backgroundColor: isDark ? colors.surfaceAlt : "#E5E7EB" }]} onPress={handleSolo} disabled={pending || loading}>
-        <Text style={styles.secondaryButtonText}>Continue in solo mode</Text>
-      </TouchableOpacity>
     </View>
   );
 }
@@ -137,14 +124,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   primaryButtonText: { color: "white", fontWeight: "700" },
-  secondaryButton: {
-    backgroundColor: "#E5E7EB",
-    borderRadius: 12,
-    minHeight: 44,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  secondaryButtonText: { color: "#111827", fontWeight: "700" },
   error: { color: "#B91C1C", marginTop: 4 },
   status: { color: "#047857", marginTop: 4 },
 });

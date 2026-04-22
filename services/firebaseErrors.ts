@@ -19,6 +19,10 @@ export function getFriendlyFirebaseError(error: unknown, fallback: string) {
       return "Please sign in again and retry.";
     }
 
+    if (message.includes("requires-recent-login") || message.includes("recent authentication")) {
+      return "For security, please sign out, sign in again, then retry account deletion.";
+    }
+
     if (message.includes("permission") || message.includes("permission-denied")) {
       return "You don't have permission for this action. Please sign in again and verify Firebase rules.";
     }

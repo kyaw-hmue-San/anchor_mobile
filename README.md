@@ -64,6 +64,7 @@ Current backend status:
 - Spaces + pairing code use Firestore (`services/spaces.ts`).
 - Sanctuary mood, DuoCalendar events, Guardian Alert reads, Vault memories, and snapshots use Firebase (`services/storage.ts`).
 - Profile name persists to Firebase (`services/profile.ts`).
+- App settings persist to Firebase with local cache fallback (`services/appSettings.ts`).
 
 ## Project Structure
 

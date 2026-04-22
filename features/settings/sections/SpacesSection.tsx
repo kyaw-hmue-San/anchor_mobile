@@ -3,7 +3,6 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet } from "react-nativ
 import { useAppTheme } from "../../../context/ThemeContext";
 
 type Props = {
-  mode: "solo" | "couple";
   activeSpaceId: string | null;
   spaceLoading: boolean;
   userId: string | null;
@@ -13,8 +12,6 @@ type Props = {
   statusMsg: string | null;
   setSpaceName: (value: string) => void;
   setJoinCode: (value: string) => void;
-  onSolo: () => void;
-  onCoupleHint: () => void;
   onCreateSpace: () => void;
   onJoinSpace: () => void;
   onGenerateCode: () => void;
@@ -24,7 +21,6 @@ export function SpacesSection(props: Props) {
   const { colors } = useAppTheme();
 
   const {
-    mode,
     activeSpaceId,
     spaceLoading,
     userId,
@@ -34,8 +30,6 @@ export function SpacesSection(props: Props) {
     statusMsg,
     setSpaceName,
     setJoinCode,
-    onSolo,
-    onCoupleHint,
     onCreateSpace,
     onJoinSpace,
     onGenerateCode,
@@ -44,26 +38,9 @@ export function SpacesSection(props: Props) {
   return (
     <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
       <Text style={[styles.cardTitle, { color: colors.text }]}>Spaces</Text>
-      <Text style={[styles.muted, { color: colors.muted }]}>Mode: {mode === "couple" ? "Couple (shared space)" : "Solo (local only)"}</Text>
+      <Text style={[styles.muted, { color: colors.muted }]}>Mode: Couple (shared space required)</Text>
       <Text style={[styles.muted, { color: colors.muted }]}>Active space: {activeSpaceId ?? "None"}</Text>
       {!userId ? <Text style={styles.warningText}>Sign in to create or join shared spaces.</Text> : null}
-
-      <View style={styles.modeRow}>
-        <TouchableOpacity
-          style={[styles.modeButton, { borderColor: colors.border, backgroundColor: colors.surface }, mode === "solo" && styles.modeButtonActive, spaceLoading && styles.disabledButton]}
-          onPress={onSolo}
-          disabled={spaceLoading}
-        >
-          <Text style={[styles.modeButtonText, { color: colors.text }, mode === "solo" && styles.modeButtonTextActive]}>Solo</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.modeButton, { borderColor: colors.border, backgroundColor: colors.surface }, mode === "couple" && styles.modeButtonActive, spaceLoading && styles.disabledButton]}
-          onPress={onCoupleHint}
-          disabled={spaceLoading}
-        >
-          <Text style={[styles.modeButtonText, { color: colors.text }, mode === "couple" && styles.modeButtonTextActive]}>Couple</Text>
-        </TouchableOpacity>
-      </View>
 
       <TextInput
         placeholder="Space name"
@@ -123,20 +100,6 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 16, fontWeight: "700", color: "#111827" },
   muted: { color: "#6B7280" },
   warningText: { color: "#92400E", fontWeight: "600" },
-  modeRow: { flexDirection: "row", gap: 8, alignItems: "center" },
-  modeButton: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-    borderRadius: 10,
-    minHeight: 44,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#FFF",
-  },
-  modeButtonActive: { backgroundColor: "#F3E8FF", borderColor: "#7C3AED" },
-  modeButtonText: { fontWeight: "700" },
-  modeButtonTextActive: { color: "#7C3AED" },
   input: {
     borderWidth: 1,
     borderColor: "#E5E7EB",

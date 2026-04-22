@@ -9,6 +9,7 @@ import { Memory, MemoryTag, Snapshot } from "../../models/types";
 import { addMemoryFromSnapshot, addNoteMemory, getTodaySnapshot, listMemories } from "../../services/storage";
 import { useAppTheme } from "../../context/ThemeContext";
 import { getFriendlyFirebaseError } from "../../services/firebaseErrors";
+import { CoupleModeGate } from "../../components/CoupleModeGate";
 
 const memoryTags: MemoryTag[] = ["trip", "anniversary", "apology", "gift"];
 
@@ -101,7 +102,8 @@ export function VaultScreen() {
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={["top","left","right"]}>
-      <ScrollView style={[styles.screen, { backgroundColor: colors.background }]} contentContainerStyle={styles.content}>
+      <CoupleModeGate>
+        <ScrollView style={[styles.screen, { backgroundColor: colors.background }]} contentContainerStyle={styles.content}>
           <View style={styles.topBar}>
             <AnchorLogo size={35} />
             <MenuButton color={colors.text} />
@@ -240,6 +242,7 @@ export function VaultScreen() {
             )}
           </View>
         </ScrollView>
+      </CoupleModeGate>
     </SafeAreaView>
   );
 }

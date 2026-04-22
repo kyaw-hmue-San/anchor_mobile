@@ -16,7 +16,7 @@ export function SpacesScreen() {
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const { loading: spaceLoading, userId, mode, activeSpaceId, setSoloMode, setCoupleMode, createSpace, joinWithCode, generateCode } = useSpace();
+  const { loading: spaceLoading, userId, activeSpaceId, createSpace, joinWithCode, generateCode } = useSpace();
 
   const disableActions = spaceLoading || busy;
 
@@ -69,17 +69,6 @@ export function SpacesScreen() {
     }
   };
 
-  const onCoupleMode = async () => {
-    const err = await setCoupleMode();
-    if (err) {
-      const message = getFriendlyFirebaseError(err, "Couple mode is unavailable right now.");
-      Alert.alert("Couple mode unavailable", message);
-      setStatusMsg(message);
-      return;
-    }
-    setStatusMsg(activeSpaceId ? `Couple mode active in ${activeSpaceId}` : "Couple mode active");
-  };
-
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={["top", "left", "right"]}>
       <ScrollView style={[styles.screen, { backgroundColor: colors.background }]} contentContainerStyle={styles.content}>
@@ -91,7 +80,6 @@ export function SpacesScreen() {
         <Text style={[styles.screenTitle, { color: colors.text }]}>Spaces</Text>
 
         <SpacesSection
-          mode={mode}
           activeSpaceId={activeSpaceId}
           spaceLoading={disableActions}
           userId={userId}
@@ -101,8 +89,6 @@ export function SpacesScreen() {
           statusMsg={statusMsg}
           setSpaceName={setSpaceName}
           setJoinCode={setJoinCode}
-          onSolo={setSoloMode}
-          onCoupleHint={onCoupleMode}
           onCreateSpace={onCreateSpace}
           onJoinSpace={onJoinSpace}
           onGenerateCode={onGenerateCode}

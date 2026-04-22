@@ -6,7 +6,7 @@ import { getAppSettings } from "../services/appSettings";
 import { useAppTheme } from "../context/ThemeContext";
 
 export function ConnectionStatusBanner() {
-  const { mode, activeSpaceId, spaceMemberCount, isCoupleConnected } = useSpace();
+  const { activeSpaceId, spaceMemberCount, isCoupleConnected } = useSpace();
   const { colors, isDark } = useAppTheme();
   const [showOnlineStatus, setShowOnlineStatus] = useState(true);
 
@@ -25,20 +25,11 @@ export function ConnectionStatusBanner() {
 
   if (!showOnlineStatus) return null;
 
-  if (mode === "solo") {
-    return (
-      <View style={[styles.banner, styles.solo, { backgroundColor: isDark ? colors.surfaceAlt : "#F3F4F6", borderColor: colors.border }]}>
-        <Ionicons name="person-outline" size={16} color={colors.muted} />
-        <Text style={[styles.text, { color: colors.text }]}>Solo mode</Text>
-      </View>
-    );
-  }
-
   if (!activeSpaceId) {
     return (
       <View style={[styles.banner, styles.waiting, { backgroundColor: isDark ? "#3F2A00" : "#FFFBEB", borderColor: isDark ? "#5B4410" : "#FDE68A" }]}>
         <Ionicons name="link-outline" size={16} color="#92400E" />
-        <Text style={[styles.text, { color: colors.text }]}>Couple mode: no active space yet</Text>
+        <Text style={[styles.text, { color: colors.text }]}>No active shared space yet</Text>
       </View>
     );
   }
@@ -69,10 +60,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-  },
-  solo: {
-    backgroundColor: "#F3F4F6",
-    borderColor: "#E5E7EB",
   },
   waiting: {
     backgroundColor: "#FFFBEB",

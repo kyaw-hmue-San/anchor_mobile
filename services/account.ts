@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { deleteUser } from "firebase/auth";
-import { collection, collectionGroup, deleteDoc, doc, getDocs, query, where } from "firebase/firestore";
+import { collection, collectionGroup, deleteDoc, doc, getDocs, query, setDoc, where } from "firebase/firestore";
 import { getFirebaseAuth, getFirebaseDb } from "./firebase";
 import { clearQuickPin } from "./quickPin";
 
@@ -11,7 +11,7 @@ async function removeDocsFromCollectionPath(path: string) {
   const db = getFirebaseDb();
   if (!db) return;
   const snap = await getDocs(collection(db, path));
-  await Promise.all(snap.docs.map(item => deleteDoc(item.ref)));
+  await Promise.allSettled(snap.docs.map(item => deleteDoc(item.ref)));
 }
 
 export async function clearLocalCache() {
@@ -34,26 +34,41 @@ export async function deleteCurrentAccountData() {
   const memberSnap = await getDocs(query(collectionGroup(db, "members"), where("userId", "==", userId)));
   const spaceIds = memberSnap.docs.map(item => item.ref.parent.parent?.id).filter((id): id is string => !!id);
 
-  await Promise.all(memberSnap.docs.map(item => deleteDoc(item.ref)));
-
   const scopedCollections = ["moods", "events", "memories", "snapshots", "activity", "goals"];
   await Promise.all(
     spaceIds.flatMap(spaceId =>
       scopedCollections.map(async collectionName => {
         const scoped = await getDocs(query(collection(db, `spaces/${spaceId}/${collectionName}`), where("userId", "==", userId)));
-        await Promise.all(scoped.docs.map(item => deleteDoc(item.ref)));
+        await Promise.allSettled(scoped.docs.map(item => deleteDoc(item.ref)));
       })
     )
   );
+
+  await Promise.allSettled(memberSnap.docs.map(item => deleteDoc(item.ref)));
 
   const [createdCodes, usedCodes] = await Promise.all([
     getDocs(query(collection(db, "pairing_codes"), where("createdBy", "==", userId))),
     getDocs(query(collection(db, "pairing_codes"), where("usedBy", "==", userId))),
   ]);
-  const uniqueCodeRefs = new Map<string, ReturnType<typeof doc>>();
+
+  // Deleting pairing codes is forbidden by rules, so mark them revoked/used instead.
+  const uniqueCodeRefs = new Map<string, (typeof createdCodes.docs)[number]["ref"]>();
   createdCodes.docs.forEach(item => uniqueCodeRefs.set(item.ref.path, item.ref));
   usedCodes.docs.forEach(item => uniqueCodeRefs.set(item.ref.path, item.ref));
-  await Promise.all(Array.from(uniqueCodeRefs.values()).map(itemRef => deleteDoc(itemRef)));
+  await Promise.allSettled(
+    Array.from(uniqueCodeRefs.values()).map(itemRef =>
+      setDoc(
+        itemRef,
+        {
+          used: true,
+          revokedByAccountDeletion: true,
+          revokedBy: userId,
+          revokedAt: Date.now(),
+        },
+        { merge: true }
+      )
+    )
+  );
 
   await deleteDoc(doc(db, "users", userId));
   await clearQuickPin(userId);

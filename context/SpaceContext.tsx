@@ -16,10 +16,9 @@ import {
   joinSpaceWithCodeRecord,
 } from "../services/spaces";
 
-const MODE_KEY = "anchor:mode";
 const SPACE_KEY = "anchor:space";
 
-type SpaceMode = "solo" | "couple";
+type SpaceMode = "couple";
 type AppSession = { user: { id: string; email: string } };
 
 function toSession(user: User | null): AppSession | null {
@@ -36,7 +35,6 @@ interface SpaceContextValue {
   activeSpaceId: string | null;
   spaceMemberCount: number;
   isCoupleConnected: boolean;
-  setSoloMode: () => Promise<void>;
   setCoupleMode: () => Promise<Error | null>;
   signIn: (email: string, password: string) => Promise<Error | null>;
   signUp: (email: string, password: string) => Promise<Error | null>;
@@ -51,7 +49,7 @@ const SpaceContext = createContext<SpaceContextValue | undefined>(undefined);
 
 export function SpaceProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<AppSession | null>(null);
-  const [mode, setMode] = useState<SpaceMode>("solo");
+  const [mode, setMode] = useState<SpaceMode>("couple");
   const [activeSpaceId, setActiveSpaceId] = useState<string | null>(null);
   const [spaceMemberCount, setSpaceMemberCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -60,13 +58,10 @@ export function SpaceProvider({ children }: { children: React.ReactNode }) {
 
   const userId = session?.user?.id ?? null;
 
-  const persist = useCallback(async (nextMode: SpaceMode, spaceId: string | null) => {
-    setMode(nextMode);
+  const persist = useCallback(async (spaceId: string | null) => {
+    setMode("couple");
     setActiveSpaceId(spaceId);
-    await AsyncStorage.multiSet([
-      [MODE_KEY, nextMode],
-      [SPACE_KEY, spaceId ?? ""],
-    ]);
+    await AsyncStorage.setItem(SPACE_KEY, spaceId ?? "");
   }, []);
 
   const retrySessionBootstrap = useCallback(async () => {
@@ -80,9 +75,9 @@ export function SpaceProvider({ children }: { children: React.ReactNode }) {
     let isMounted = true;
 
     const init = async () => {
-      const [[, storedMode], [, storedSpace]] = await AsyncStorage.multiGet([MODE_KEY, SPACE_KEY]);
+      const storedSpace = await AsyncStorage.getItem(SPACE_KEY);
       if (!isMounted) return;
-      setMode((storedMode as SpaceMode) || "solo");
+      setMode("couple");
       setActiveSpaceId(storedSpace || null);
       setStartupIssue(null);
 
@@ -128,11 +123,6 @@ export function SpaceProvider({ children }: { children: React.ReactNode }) {
     };
   }, [bootstrapVersion]);
 
-  const setSoloMode = useCallback(async () => {
-    setSpaceMemberCount(0);
-    await persist("solo", null);
-  }, [persist]);
-
   const setCoupleMode = useCallback(async () => {
     if (!activeSpaceId) return new Error("Create or join a space first");
     if (!userId) return new Error("Sign in to use couple mode");
@@ -140,7 +130,7 @@ export function SpaceProvider({ children }: { children: React.ReactNode }) {
     try {
       const isMember = await checkSpaceMembership(activeSpaceId, userId);
       if (!isMember) return new Error("You are not a member of the active space");
-      await persist("couple", activeSpaceId);
+      await persist(activeSpaceId);
       return null;
     } catch (error) {
       return error instanceof Error ? error : new Error("Could not switch to couple mode");
@@ -209,7 +199,7 @@ export function SpaceProvider({ children }: { children: React.ReactNode }) {
         await firebaseSignOut(auth);
       }
     }
-    await persist("solo", null);
+    await persist(null);
   }, [persist]);
 
   const createSpace = useCallback(
@@ -217,7 +207,7 @@ export function SpaceProvider({ children }: { children: React.ReactNode }) {
       if (!userId) return { error: new Error("Not signed in") };
       try {
         const spaceId = await createSpaceRecord(userId, name);
-        await persist("couple", spaceId);
+        await persist(spaceId);
         return { spaceId };
       } catch (error) {
         return { error: error instanceof Error ? error : new Error("Could not create space") };
@@ -231,7 +221,7 @@ export function SpaceProvider({ children }: { children: React.ReactNode }) {
       if (!userId) return { error: new Error("Not signed in") };
       try {
         const spaceId = await joinSpaceWithCodeRecord(userId, code);
-        await persist("couple", spaceId);
+        await persist(spaceId);
         return { spaceId };
       } catch (error) {
         return { error: error instanceof Error ? error : new Error("Invalid or expired pairing code") };
@@ -267,7 +257,6 @@ export function SpaceProvider({ children }: { children: React.ReactNode }) {
     activeSpaceId,
     spaceMemberCount,
     isCoupleConnected: mode === "couple" && !!activeSpaceId && spaceMemberCount >= 2,
-    setSoloMode,
     setCoupleMode,
     signIn,
     signUp,

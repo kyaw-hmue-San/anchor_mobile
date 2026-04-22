@@ -24,7 +24,7 @@ function getPhotoUploadErrorMessage(error: unknown) {
 }
 
 export function ProfileScreen() {
-  const { session, mode, activeSpaceId } = useSpace();
+  const { session, activeSpaceId } = useSpace();
   const { colors } = useAppTheme();
   const [name, setName] = useState("");
   const [initialName, setInitialName] = useState("");
@@ -226,7 +226,7 @@ export function ProfileScreen() {
 
           <View style={[styles.infoRow, { borderColor: colors.border }]}>
             <Text style={[styles.infoLabel, { color: colors.muted }]}>Mode</Text>
-            <Text style={[styles.infoValue, { color: colors.text }]}>{mode === "couple" ? "Couple" : "Solo"}</Text>
+            <Text style={[styles.infoValue, { color: colors.text }]}>Couple</Text>
           </View>
 
           <View style={[styles.infoRow, { borderColor: colors.border }]}>

@@ -22,14 +22,15 @@ import {
   MoodStreakSummary,
   PartnerPresence,
   ReminderWindow,
+  SharedLocation,
   SmartReminder,
   Snapshot,
   User,
   WeeklyPlanDay,
 } from "../models/types";
 import { getFirebaseAuth, getFirebaseDb, getFirebaseStorage } from "./firebase";
+import { cancelEventLocalNotifications, scheduleEventLocalNotifications } from "./localNotifications";
 
-const MODE_KEY = "anchor:mode";
 const SPACE_KEY = "anchor:space";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -53,13 +54,11 @@ async function getScope(): Promise<Scope> {
   }
 
   const spaceId = await AsyncStorage.getItem(SPACE_KEY);
-  const mode = await AsyncStorage.getItem(MODE_KEY);
-
-  if (mode === "couple" && spaceId) {
-    return { db, userId, basePath: ["spaces", spaceId], scopeId: spaceId };
+  if (!spaceId) {
+    throw new Error("No active shared space. Create or join a space first.");
   }
 
-  return { db, userId, basePath: ["users", userId, "private"], scopeId: userId };
+  return { db, userId, basePath: ["spaces", spaceId], scopeId: spaceId };
 }
 
 function scopeCollection(scope: Scope, collectionName: string) {
@@ -266,6 +265,12 @@ export async function saveEvent(event: Event) {
 
   await recordActivity(scope, "event-saved", `Saved event: ${event.title || "Untitled"}.`, eventId);
 
+  await scheduleEventLocalNotifications({
+    ...event,
+    id: eventId,
+    reminderWindows,
+  });
+
   return eventId;
 }
 
@@ -293,6 +298,7 @@ export async function confirmEvent(eventId: string) {
 export async function deleteEvent(id: string) {
   const scope = await getScope();
   await deleteDoc(doc(scopeCollection(scope, "events"), id));
+  await cancelEventLocalNotifications(id);
 }
 
 export async function eventsWithinNext24h(): Promise<Event[]> {
@@ -589,6 +595,48 @@ export async function getPartnerDisplayName(): Promise<string | null> {
   return "Partner";
 }
 
+export async function saveMyLocation(latitude: number, longitude: number, accuracy?: number | null) {
+  const scope = await getScope();
+  const now = Date.now();
+  const ref = doc(scopeCollection(scope, "locations"), scope.userId);
+
+  await setDoc(
+    ref,
+    {
+      userId: scope.userId,
+      latitude,
+      longitude,
+      accuracy: accuracy ?? null,
+      updatedAt: now,
+      scopeId: scope.scopeId,
+      serverUpdatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
+}
+
+export async function getPartnerLocation(): Promise<SharedLocation | null> {
+  const scope = await getScope();
+  const locationsSnap = await getDocs(scopeCollection(scope, "locations"));
+
+  const partner = locationsSnap.docs
+    .map(docSnap => docSnap.data() as Partial<SharedLocation>)
+    .find(item => typeof item.userId === "string" && item.userId !== scope.userId);
+
+  if (!partner) return null;
+  if (typeof partner.latitude !== "number" || typeof partner.longitude !== "number" || typeof partner.updatedAt !== "number") {
+    return null;
+  }
+
+  return {
+    userId: partner.userId as string,
+    latitude: partner.latitude,
+    longitude: partner.longitude,
+    accuracy: typeof partner.accuracy === "number" ? partner.accuracy : null,
+    updatedAt: partner.updatedAt,
+  };
+}
+
 export async function resetAll() {
   const auth = getFirebaseAuth();
   const userId = auth?.currentUser?.uid;
@@ -605,5 +653,5 @@ export async function resetAll() {
     );
   }
 
-  await AsyncStorage.multiRemove([MODE_KEY, SPACE_KEY]);
+  await AsyncStorage.multiRemove([SPACE_KEY]);
 }

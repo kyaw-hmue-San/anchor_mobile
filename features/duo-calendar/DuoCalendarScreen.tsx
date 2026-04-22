@@ -25,6 +25,7 @@ import { EventFormModal } from "./components/EventFormModal";
 import { getAppSettings } from "../../services/appSettings";
 import { useAppTheme } from "../../context/ThemeContext";
 import { getFriendlyFirebaseError } from "../../services/firebaseErrors";
+import { CoupleModeGate } from "../../components/CoupleModeGate";
 
 const categories: EventCategory[] = ["call", "date", "gift", "trip", "other"];
 
@@ -182,7 +183,8 @@ export function DuoCalendarScreen() {
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={["top", "left", "right"]}>
-      <ScrollView style={[styles.screen, { backgroundColor: colors.background }]} contentContainerStyle={styles.content}>
+      <CoupleModeGate>
+        <ScrollView style={[styles.screen, { backgroundColor: colors.background }]} contentContainerStyle={styles.content}>
         <View style={styles.topBar}>
           <AnchorLogo size={35} />
           <MenuButton color={colors.text} />
@@ -200,7 +202,9 @@ export function DuoCalendarScreen() {
             <Text style={[styles.muted, { color: colors.danger }]}>{error}</Text>
             <TouchableOpacity
               style={[styles.goalButton, { backgroundColor: colors.primary }, loading && styles.alertBannerDisabled]}
-              onPress={loadEvents}
+              onPress={() => {
+                loadEvents();
+              }}
               disabled={loading}
             >
               <Text style={styles.alertBannerText}>Retry sync</Text>
@@ -333,7 +337,8 @@ export function DuoCalendarScreen() {
             })
           )}
         </View>
-      </ScrollView>
+        </ScrollView>
+      </CoupleModeGate>
 
       <EventFormModal
         visible={showModal}

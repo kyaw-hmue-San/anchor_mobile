@@ -10,6 +10,7 @@ import { getAppSettings } from "../../services/appSettings";
 import { useAppTheme } from "../../context/ThemeContext";
 import { defaultSafetyCircle, getSafetyCircle, saveSafetyCircle } from "../../services/safetyCircle";
 import { getFriendlyFirebaseError } from "../../services/firebaseErrors";
+import { CoupleModeGate } from "../../components/CoupleModeGate";
 
 export function GuardianAlertScreen() {
   const { colors } = useAppTheme();
@@ -131,7 +132,8 @@ export function GuardianAlertScreen() {
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={["top","left","right"]}>
-      <ScrollView style={[styles.screen, { backgroundColor: colors.background }]} contentContainerStyle={styles.content}>
+      <CoupleModeGate>
+        <ScrollView style={[styles.screen, { backgroundColor: colors.background }]} contentContainerStyle={styles.content}>
           <View style={styles.topBar}>
             <AnchorLogo size={35} />
             <MenuButton color={colors.text} />
@@ -268,6 +270,7 @@ export function GuardianAlertScreen() {
             ))}
           </View>
         </ScrollView>
+      </CoupleModeGate>
     </SafeAreaView>
   );
 }
