@@ -46,7 +46,10 @@ export async function createSpaceRecord(userId: string, name: string) {
     throw toFriendlyError(error, "Could not create space");
   }
 
-  return spaceRef.id;
+  return {
+    spaceId: spaceRef.id,
+    spaceName: name.trim() || "Shared Space",
+  };
 }
 
 export async function createPairingCodeRecord(spaceId: string, createdBy: string, ttlMinutes = 15) {
@@ -126,7 +129,13 @@ export async function joinSpaceWithCodeRecord(userId: string, code: string) {
     throw toFriendlyError(error, "Could not join space");
   });
 
-  return spaceId;
+  const spaceSnap = await getDoc(doc(db, "spaces", spaceId));
+  const spaceData = spaceSnap.exists() ? (spaceSnap.data() as { name?: string }) : null;
+
+  return {
+    spaceId,
+    spaceName: spaceData?.name?.trim() || "Shared Space",
+  };
 }
 
 export async function checkSpaceMembership(spaceId: string, userId: string) {

@@ -1,10 +1,12 @@
 import React from "react";
-import { View, Text, TextInput, TouchableOpacity, StyleSheet } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
 import { useAppTheme } from "../../../context/ThemeContext";
 
 type Props = {
   activeSpaceId: string | null;
+  activeSpaceName: string | null;
   spaceLoading: boolean;
+  loadingAction: "create" | "join" | "generate" | null;
   userId: string | null;
   spaceName: string;
   joinCode: string;
@@ -15,6 +17,7 @@ type Props = {
   onCreateSpace: () => void;
   onJoinSpace: () => void;
   onGenerateCode: () => void;
+  onCopyCode: (value: string) => void;
 };
 
 export function SpacesSection(props: Props) {
@@ -22,7 +25,9 @@ export function SpacesSection(props: Props) {
 
   const {
     activeSpaceId,
+    activeSpaceName,
     spaceLoading,
+    loadingAction,
     userId,
     spaceName,
     joinCode,
@@ -33,13 +38,28 @@ export function SpacesSection(props: Props) {
     onCreateSpace,
     onJoinSpace,
     onGenerateCode,
+    onCopyCode,
   } = props;
+
+  const hasActiveSpace = !!activeSpaceId;
+  const createDisabled = spaceLoading || hasActiveSpace;
+
+  const renderButtonLabel = (label: string, action: "create" | "join" | "generate") => {
+    if (loadingAction !== action) return <Text style={styles.primaryButtonText}>{label}</Text>;
+
+    return (
+      <View style={styles.loadingRow}>
+        <ActivityIndicator size="small" color="white" />
+        <Text style={styles.primaryButtonText}>{label.replace(/^[a-z]/, char => char.toUpperCase())}...</Text>
+      </View>
+    );
+  };
 
   return (
     <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
       <Text style={[styles.cardTitle, { color: colors.text }]}>Spaces</Text>
       <Text style={[styles.muted, { color: colors.muted }]}>Mode: Couple (shared space required)</Text>
-      <Text style={[styles.muted, { color: colors.muted }]}>Active space: {activeSpaceId ?? "None"}</Text>
+      <Text style={[styles.muted, { color: colors.muted }]}>Active space: {activeSpaceName ?? activeSpaceId ?? "None"}</Text>
       {!userId ? <Text style={styles.warningText}>Sign in to create or join shared spaces.</Text> : null}
 
       <TextInput
@@ -48,15 +68,16 @@ export function SpacesSection(props: Props) {
         onChangeText={setSpaceName}
         style={[styles.input, { borderColor: colors.border, backgroundColor: colors.surface, color: colors.text }]}
         placeholderTextColor={colors.muted}
-        editable={!spaceLoading}
+        editable={!createDisabled}
       />
       <TouchableOpacity
-        style={[styles.primaryButton, { backgroundColor: colors.primary }, spaceLoading && styles.disabledButton]}
+        style={[styles.primaryButton, { backgroundColor: colors.primary }, createDisabled && styles.disabledButton]}
         onPress={onCreateSpace}
-        disabled={spaceLoading}
+        disabled={createDisabled}
       >
-        <Text style={styles.primaryButtonText}>Create space</Text>
+        {renderButtonLabel("Create space", "create")}
       </TouchableOpacity>
+      {hasActiveSpace ? <Text style={[styles.statusText, { color: colors.muted }]}>You already have an active space. Creating another space is disabled.</Text> : null}
 
       <TextInput
         placeholder="Pairing code"
@@ -71,7 +92,7 @@ export function SpacesSection(props: Props) {
         onPress={onJoinSpace}
         disabled={spaceLoading}
       >
-        <Text style={styles.primaryButtonText}>Join space</Text>
+        {renderButtonLabel("Join space", "join")}
       </TouchableOpacity>
 
       <TouchableOpacity
@@ -79,10 +100,24 @@ export function SpacesSection(props: Props) {
         onPress={onGenerateCode}
         disabled={!activeSpaceId || spaceLoading}
       >
-        <Text style={[styles.secondaryButtonText, { color: colors.text }]}>Generate pairing code</Text>
+        {loadingAction === "generate" ? (
+          <View style={styles.loadingRow}>
+            <ActivityIndicator size="small" color={colors.primary} />
+            <Text style={[styles.secondaryButtonText, { color: colors.text }]}>Generating...</Text>
+          </View>
+        ) : (
+          <Text style={[styles.secondaryButtonText, { color: colors.text }]}>Generate pairing code</Text>
+        )}
       </TouchableOpacity>
 
-      {lastCode ? <Text style={[styles.codeBadge, { color: colors.text }]}>Share code: {lastCode}</Text> : null}
+      {lastCode ? (
+        <View style={styles.codeRow}>
+          <Text style={[styles.codeBadge, { color: colors.text }]}>Share code: {lastCode}</Text>
+          <TouchableOpacity style={[styles.copyButton, { borderColor: colors.border }]} onPress={() => onCopyCode(lastCode)}>
+            <Text style={[styles.copyButtonText, { color: colors.text }]}>Share</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
       {statusMsg ? <Text style={[styles.statusText, { color: colors.muted }]}>{statusMsg}</Text> : null}
     </View>
   );
@@ -116,6 +151,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  loadingRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   primaryButtonText: { color: "white", fontWeight: "700" },
   secondaryButton: {
     borderRadius: 12,
@@ -127,7 +163,17 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
   },
   secondaryButtonText: { color: "#111827", fontWeight: "700" },
-  codeBadge: { marginTop: 6, color: "#111827", fontWeight: "700" },
+  codeRow: { marginTop: 6, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  codeBadge: { flex: 1, color: "#111827", fontWeight: "700" },
+  copyButton: {
+    borderWidth: 1,
+    borderRadius: 10,
+    minHeight: 36,
+    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  copyButtonText: { fontWeight: "700" },
   statusText: { marginTop: 4, color: "#6B7280" },
   disabledButton: { opacity: 0.55 },
 });

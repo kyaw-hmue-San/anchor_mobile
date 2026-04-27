@@ -5,17 +5,18 @@ export const linking: LinkingOptions<any> = {
   prefixes: ["/"],
   config: {
     screens: {
-      [ROUTES.Landing]: "landing",
+      [ROUTES.Landing]: "",
       [ROUTES.Auth]: "auth",
       [ROUTES.QuickPinSetup]: "quick-pin-setup",
       [ROUTES.QuickPinUnlock]: "quick-pin-unlock",
       [ROUTES.ChangeQuickPin]: "change-quick-pin",
       [ROUTES.MainTabs]: {
-        path: "",
+        path: "app",
         screens: {
           Home: {
             path: "",
             screens: {
+              [ROUTES.SoloTimeline]: "date",
               [ROUTES.Sanctuary]: "sanctuary",
               [ROUTES.DuoCalendar]: {
                 path: "calendar",

@@ -7,7 +7,7 @@ import {
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
 } from "firebase/auth";
-import { collection, onSnapshot } from "firebase/firestore";
+import { collection, doc, getDoc, onSnapshot } from "firebase/firestore";
 import { getFirebaseAuth, getFirebaseConfigError, getFirebaseDb, isFirebaseConfigured } from "../services/firebase";
 import {
   checkSpaceMembership,
@@ -17,6 +17,7 @@ import {
 } from "../services/spaces";
 
 const SPACE_KEY = "anchor:space";
+const SPACE_NAME_KEY = "anchor:space:name";
 
 type SpaceMode = "couple";
 type AppSession = { user: { id: string; email: string } };
@@ -33,14 +34,15 @@ interface SpaceContextValue {
   userId: string | null;
   mode: SpaceMode;
   activeSpaceId: string | null;
+  activeSpaceName: string | null;
   spaceMemberCount: number;
   isCoupleConnected: boolean;
   setCoupleMode: () => Promise<Error | null>;
   signIn: (email: string, password: string) => Promise<Error | null>;
   signUp: (email: string, password: string) => Promise<Error | null>;
   signOut: () => Promise<void>;
-  createSpace: (name: string) => Promise<{ spaceId?: string; error?: Error | null }>;
-  joinWithCode: (code: string) => Promise<{ spaceId?: string; error?: Error | null }>;
+  createSpace: (name: string) => Promise<{ spaceId?: string; spaceName?: string; error?: Error | null }>;
+  joinWithCode: (code: string) => Promise<{ spaceId?: string; spaceName?: string; error?: Error | null }>;
   generateCode: (spaceId: string, ttlMinutes?: number) => Promise<{ code?: string; error?: Error | null }>;
   retrySessionBootstrap: () => Promise<void>;
 }
@@ -51,6 +53,7 @@ export function SpaceProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<AppSession | null>(null);
   const [mode, setMode] = useState<SpaceMode>("couple");
   const [activeSpaceId, setActiveSpaceId] = useState<string | null>(null);
+  const [activeSpaceName, setActiveSpaceName] = useState<string | null>(null);
   const [spaceMemberCount, setSpaceMemberCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [startupIssue, setStartupIssue] = useState<string | null>(null);
@@ -58,10 +61,12 @@ export function SpaceProvider({ children }: { children: React.ReactNode }) {
 
   const userId = session?.user?.id ?? null;
 
-  const persist = useCallback(async (spaceId: string | null) => {
+  const persist = useCallback(async (spaceId: string | null, spaceName: string | null = null) => {
     setMode("couple");
     setActiveSpaceId(spaceId);
+    setActiveSpaceName(spaceName);
     await AsyncStorage.setItem(SPACE_KEY, spaceId ?? "");
+    await AsyncStorage.setItem(SPACE_NAME_KEY, spaceName ?? "");
   }, []);
 
   const retrySessionBootstrap = useCallback(async () => {
@@ -76,10 +81,28 @@ export function SpaceProvider({ children }: { children: React.ReactNode }) {
 
     const init = async () => {
       const storedSpace = await AsyncStorage.getItem(SPACE_KEY);
+      const storedSpaceName = await AsyncStorage.getItem(SPACE_NAME_KEY);
       if (!isMounted) return;
       setMode("couple");
       setActiveSpaceId(storedSpace || null);
+      setActiveSpaceName(storedSpaceName || null);
       setStartupIssue(null);
+
+      if (storedSpace && !storedSpaceName && isFirebaseConfigured()) {
+        const db = getFirebaseDb();
+        if (db) {
+          try {
+            const spaceSnap = await getDoc(doc(db, "spaces", storedSpace));
+            const spaceName = spaceSnap.exists() ? (spaceSnap.data() as { name?: string }).name?.trim() : "";
+            if (isMounted && spaceName) {
+              setActiveSpaceName(spaceName);
+              await AsyncStorage.setItem(SPACE_NAME_KEY, spaceName);
+            }
+          } catch {
+            // Keep the stored id if the space name cannot be resolved yet.
+          }
+        }
+      }
 
       if (!isFirebaseConfigured()) {
         setStartupIssue(getFirebaseConfigError() || "Firebase is not configured.");
@@ -130,12 +153,12 @@ export function SpaceProvider({ children }: { children: React.ReactNode }) {
     try {
       const isMember = await checkSpaceMembership(activeSpaceId, userId);
       if (!isMember) return new Error("You are not a member of the active space");
-      await persist(activeSpaceId);
+      await persist(activeSpaceId, activeSpaceName);
       return null;
     } catch (error) {
       return error instanceof Error ? error : new Error("Could not switch to couple mode");
     }
-  }, [activeSpaceId, persist, userId]);
+  }, [activeSpaceId, activeSpaceName, persist, userId]);
 
   useEffect(() => {
     if (!isFirebaseConfigured() || mode !== "couple" || !activeSpaceId) {
@@ -206,9 +229,9 @@ export function SpaceProvider({ children }: { children: React.ReactNode }) {
     async (name: string) => {
       if (!userId) return { error: new Error("Not signed in") };
       try {
-        const spaceId = await createSpaceRecord(userId, name);
-        await persist(spaceId);
-        return { spaceId };
+        const result = await createSpaceRecord(userId, name);
+        await persist(result.spaceId, result.spaceName);
+        return result;
       } catch (error) {
         return { error: error instanceof Error ? error : new Error("Could not create space") };
       }
@@ -220,9 +243,9 @@ export function SpaceProvider({ children }: { children: React.ReactNode }) {
     async (code: string) => {
       if (!userId) return { error: new Error("Not signed in") };
       try {
-        const spaceId = await joinSpaceWithCodeRecord(userId, code);
-        await persist(spaceId);
-        return { spaceId };
+        const result = await joinSpaceWithCodeRecord(userId, code);
+        await persist(result.spaceId, result.spaceName);
+        return result;
       } catch (error) {
         return { error: error instanceof Error ? error : new Error("Invalid or expired pairing code") };
       }
@@ -255,6 +278,7 @@ export function SpaceProvider({ children }: { children: React.ReactNode }) {
     userId,
     mode,
     activeSpaceId,
+    activeSpaceName,
     spaceMemberCount,
     isCoupleConnected: mode === "couple" && !!activeSpaceId && spaceMemberCount >= 2,
     setCoupleMode,

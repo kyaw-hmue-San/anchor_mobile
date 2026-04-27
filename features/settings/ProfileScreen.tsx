@@ -24,7 +24,7 @@ function getPhotoUploadErrorMessage(error: unknown) {
 }
 
 export function ProfileScreen() {
-  const { session, activeSpaceId } = useSpace();
+  const { session, activeSpaceId, activeSpaceName } = useSpace();
   const { colors } = useAppTheme();
   const [name, setName] = useState("");
   const [initialName, setInitialName] = useState("");
@@ -231,7 +231,7 @@ export function ProfileScreen() {
 
           <View style={[styles.infoRow, { borderColor: colors.border }]}>
             <Text style={[styles.infoLabel, { color: colors.muted }]}>Active Space</Text>
-            <Text style={[styles.infoValue, { color: colors.text }]} numberOfLines={1}>{activeSpaceId ?? "None"}</Text>
+            <Text style={[styles.infoValue, { color: colors.text }]} numberOfLines={1}>{activeSpaceName ?? activeSpaceId ?? "None"}</Text>
           </View>
 
           <Text style={[styles.label, { color: colors.text }]}>Username</Text>

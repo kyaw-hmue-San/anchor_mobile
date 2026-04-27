@@ -16,18 +16,20 @@ import { Ionicons } from "@expo/vector-icons";
 import { AnchorLogo } from "../../components/AnchorLogo";
 import { MenuButton } from "../../components/MenuButton";
 import { ConnectionStatusBanner } from "../../components/ConnectionStatusBanner";
-import { ActivityItem, MoodEntry, MoodOption, MoodStreakSummary, PartnerPresence, SharedLocation, Snapshot } from "../../models/types";
+import { MoodEntry, MoodOption, PartnerPresence, SharedLocation, Snapshot } from "../../models/types";
 import {
   ensurePartnerMood,
   getMood,
-  getMoodStreakSummary,
   getPartnerDisplayName,
   getPartnerLocation,
+  getPartnerSnapshot,
   getPartnerPresenceSummary,
-  getTodaySnapshot,
-  listActivityFeed,
   saveMyLocation,
   saveSnapshot,
+  subscribeToPartnerEventActivity,
+  subscribeToPartnerLocation,
+  subscribeToPartnerMood,
+  subscribeToPartnerSnapshot,
   setMood,
 } from "../../services/storage";
 import { CoupleModeGate } from "../../components/CoupleModeGate";
@@ -47,7 +49,7 @@ export function SanctuaryScreen() {
   const [savingSnapshot, setSavingSnapshot] = useState(false);
   const [myMood, setMyMood] = useState<MoodEntry | null>(null);
   const [partnerMood, setPartnerMoodState] = useState<MoodEntry | null>(null);
-  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [partnerSnapshot, setPartnerSnapshot] = useState<Snapshot | null>(null);
   const [partnerName, setPartnerName] = useState("Partner");
   const [shareLocationEnabled, setShareLocationEnabled] = useState(false);
   const [locationUpdatesEnabled, setLocationUpdatesEnabled] = useState(true);
@@ -55,36 +57,39 @@ export function SanctuaryScreen() {
   const [sharingLocation, setSharingLocation] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [presence, setPresence] = useState<PartnerPresence>({ moodUpdatedAt: null, snapshotSavedAt: null, eventUpdatedAt: null });
-  const [streak, setStreak] = useState<MoodStreakSummary>({ streakDays: 0, weeklyCheckins: 0, missedToday: false });
-  const [feed, setFeed] = useState<ActivityItem[]>([]);
+  const [lastLiveUpdateAt, setLastLiveUpdateAt] = useState<number | null>(null);
+
+  const refreshPartnerSignals = async () => {
+    const [partner, presenceSummary, latestPartnerLocation, latestPartnerSnapshot, partnerDisplayName] = await Promise.all([
+      ensurePartnerMood(),
+      getPartnerPresenceSummary(),
+      getPartnerLocation(),
+      getPartnerSnapshot(),
+      getPartnerDisplayName(),
+    ]);
+
+    setPartnerMoodState(partner);
+    setPresence(presenceSummary);
+    setPartnerLocation(latestPartnerLocation);
+    setPartnerSnapshot(latestPartnerSnapshot);
+    setPartnerName(partnerDisplayName?.trim() || "Partner");
+    setLastLiveUpdateAt(Date.now());
+  };
 
   const loadSanctuaryState = async () => {
     setInitialLoading(true);
     setError(null);
     try {
-      const [mine, partner, snap, partnerDisplayName, appSettings] = await Promise.all([
+      const [mine, snap, appSettings] = await Promise.all([
         getMood(),
-        ensurePartnerMood(),
-        getTodaySnapshot(),
-        getPartnerDisplayName(),
+        getPartnerSnapshot(),
         getAppSettings(),
       ]);
-      const [presenceSummary, streakSummary, activity, latestPartnerLocation] = await Promise.all([
-        getPartnerPresenceSummary(),
-        getMoodStreakSummary(),
-        listActivityFeed(10),
-        getPartnerLocation(),
-      ]);
       setMyMood(mine);
-      setPartnerMoodState(partner);
-      setSnapshot(snap);
-      setPartnerName(partnerDisplayName?.trim() || "Partner");
+      setPartnerSnapshot(snap);
       setShareLocationEnabled(appSettings.shareLocation);
       setLocationUpdatesEnabled(appSettings.locationUpdates);
-      setPresence(presenceSummary);
-      setStreak(streakSummary);
-      setFeed(activity);
-      setPartnerLocation(latestPartnerLocation);
+      await refreshPartnerSignals();
     } catch (error) {
       setError(getFriendlyFirebaseError(error, "Failed to load sanctuary state."));
     } finally {
@@ -93,7 +98,134 @@ export function SanctuaryScreen() {
   };
 
   useEffect(() => {
-    loadSanctuaryState();
+    void loadSanctuaryState();
+  }, []);
+
+  useEffect(() => {
+    let unsubscribe: (() => void) | null = null;
+    let active = true;
+
+    const start = async () => {
+      try {
+        unsubscribe = await subscribeToPartnerLocation(
+          location => {
+            if (!active) return;
+            setPartnerLocation(location);
+            setLastLiveUpdateAt(Date.now());
+          },
+          () => {
+            // Keep the last known location on transient listener failures.
+          }
+        );
+      } catch {
+        // If subscription setup fails, polling still keeps data fresh.
+      }
+    };
+
+    void start();
+
+    return () => {
+      active = false;
+      unsubscribe?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    let unsubscribe: (() => void) | null = null;
+    let active = true;
+
+    const start = async () => {
+      try {
+        unsubscribe = await subscribeToPartnerMood(
+          mood => {
+            if (!active) return;
+            setPartnerMoodState(mood);
+            setPresence(prev => ({
+              ...prev,
+              moodUpdatedAt: mood?.updatedAt ?? null,
+            }));
+            setLastLiveUpdateAt(Date.now());
+          },
+          () => {
+            // Keep the last known mood on transient listener failures.
+          }
+        );
+      } catch {
+        // Initial load and manual sync still provide fallback data.
+      }
+    };
+
+    void start();
+
+    return () => {
+      active = false;
+      unsubscribe?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    let unsubscribe: (() => void) | null = null;
+    let active = true;
+
+    const start = async () => {
+      try {
+        unsubscribe = await subscribeToPartnerSnapshot(
+          snapshot => {
+            if (!active) return;
+            setPartnerSnapshot(snapshot);
+            setPresence(prev => ({
+              ...prev,
+              snapshotSavedAt: snapshot?.createdAt ?? null,
+            }));
+            setLastLiveUpdateAt(Date.now());
+          },
+          () => {
+            // Keep last known partner snapshot on transient listener failures.
+          }
+        );
+      } catch {
+        // If subscription setup fails, polling still keeps data fresh.
+      }
+    };
+
+    void start();
+
+    return () => {
+      active = false;
+      unsubscribe?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    let unsubscribe: (() => void) | null = null;
+    let active = true;
+
+    const start = async () => {
+      try {
+        unsubscribe = await subscribeToPartnerEventActivity(
+          updatedAt => {
+            if (!active) return;
+            setPresence(prev => ({
+              ...prev,
+              eventUpdatedAt: updatedAt,
+            }));
+            setLastLiveUpdateAt(Date.now());
+          },
+          () => {
+            // Keep the last known event activity on transient listener failures.
+          }
+        );
+      } catch {
+        // Initial load and manual sync still provide fallback data.
+      }
+    };
+
+    void start();
+
+    return () => {
+      active = false;
+      unsubscribe?.();
+    };
   }, []);
 
   const onRetrySync = async () => {
@@ -107,10 +239,9 @@ export function SanctuaryScreen() {
     setError(null);
     try {
       await setMood(mood);
-      const [updated, streakSummary, activity] = await Promise.all([getMood(), getMoodStreakSummary(), listActivityFeed(10)]);
+      const updated = await getMood();
       setMyMood(updated);
-      setStreak(streakSummary);
-      setFeed(activity);
+      await refreshPartnerSignals();
     } catch (error) {
       setError(getFriendlyFirebaseError(error, "Could not save mood."));
     } finally {
@@ -136,11 +267,8 @@ export function SanctuaryScreen() {
     setSavingSnapshot(true);
     setError(null);
     try {
-      const snap = await saveSnapshot(uri);
-      const [presenceSummary, activity] = await Promise.all([getPartnerPresenceSummary(), listActivityFeed(10)]);
-      setSnapshot(snap);
-      setPresence(presenceSummary);
-      setFeed(activity);
+      await saveSnapshot(uri);
+      await refreshPartnerSignals();
     } catch (error) {
       setError(getFriendlyFirebaseError(error, "Could not save snapshot."));
     } finally {
@@ -165,6 +293,20 @@ export function SanctuaryScreen() {
         return;
       }
 
+      // Push a recent cached fix first so partner can see updates with less delay.
+      const lastKnown = await Location.getLastKnownPositionAsync({
+        maxAge: 60_000,
+        requiredAccuracy: 200,
+      });
+
+      if (lastKnown) {
+        await saveMyLocation(
+          lastKnown.coords.latitude,
+          lastKnown.coords.longitude,
+          typeof lastKnown.coords.accuracy === "number" ? lastKnown.coords.accuracy : null
+        );
+      }
+
       const current = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
@@ -175,8 +317,7 @@ export function SanctuaryScreen() {
         typeof current.coords.accuracy === "number" ? current.coords.accuracy : null
       );
 
-      const latestPartnerLocation = await getPartnerLocation();
-      setPartnerLocation(latestPartnerLocation);
+      await refreshPartnerSignals();
     } catch (error) {
       setError(getFriendlyFirebaseError(error, "Could not share your current location."));
     } finally {
@@ -225,13 +366,13 @@ export function SanctuaryScreen() {
           </View>
 
           <View style={styles.cardGroup}>
-            <Text style={[styles.sectionLabel, { color: colors.muted }]}>Current mood</Text>
+            <Text style={[styles.sectionLabel, { color: colors.muted }]}>{partnerName}'s current mood</Text>
             <View style={[styles.moodCard, { borderColor: colors.border, backgroundColor: isDark ? colors.surfaceAlt : "#F6EDFF" }] }>
               <View style={[styles.moodIconWrap, { backgroundColor: colors.primarySoft }]}>
                 <Ionicons name="book-outline" size={22} color={colors.primary} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={[styles.moodTitle, { color: colors.text }]}>{partnerMood?.mood ?? "Waiting for partner"}</Text>
+                <Text style={[styles.moodTitle, { color: colors.text }]}>{partnerMood?.mood ?? `${partnerName} has not checked in yet`}</Text>
                 <Text style={[styles.mutedText, { color: colors.muted }]}>
                   {partnerMood?.updatedAt ? new Date(partnerMood.updatedAt).toLocaleTimeString() : "No recent mood"}
                 </Text>
@@ -241,16 +382,12 @@ export function SanctuaryScreen() {
 
           <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
             <Text style={[styles.cardTitle, { color: colors.text }]}>Partner Presence Timeline</Text>
+            <Text style={[styles.mutedText, { color: colors.muted }]}>
+              Live updates: {lastLiveUpdateAt ? new Date(lastLiveUpdateAt).toLocaleTimeString() : "Waiting for partner activity"}
+            </Text>
             <Text style={[styles.mutedText, { color: colors.muted }]}>Mood update: {presence.moodUpdatedAt ? new Date(presence.moodUpdatedAt).toLocaleString() : "No update yet"}</Text>
             <Text style={[styles.mutedText, { color: colors.muted }]}>Snapshot: {presence.snapshotSavedAt ? new Date(presence.snapshotSavedAt).toLocaleString() : "No snapshot yet"}</Text>
             <Text style={[styles.mutedText, { color: colors.muted }]}>Event activity: {presence.eventUpdatedAt ? new Date(presence.eventUpdatedAt).toLocaleString() : "No event activity yet"}</Text>
-          </View>
-
-          <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
-            <Text style={[styles.cardTitle, { color: colors.text }]}>Daily Check-in Streak</Text>
-            <Text style={[styles.mutedText, { color: colors.text }]}>Streak: {streak.streakDays} day(s)</Text>
-            <Text style={[styles.mutedText, { color: colors.text }]}>This week: {streak.weeklyCheckins} check-ins</Text>
-            {streak.missedToday ? <Text style={[styles.mutedText, { color: colors.danger }]}>Gentle nudge: check in today 💜</Text> : null}
           </View>
 
           <View style={styles.cardGroup}>
@@ -304,7 +441,7 @@ export function SanctuaryScreen() {
           <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <View style={styles.cardHeaderRow}>
               <View>
-                <Text style={[styles.cardTitle, { color: colors.text }]}>Your mood today</Text>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Your current mood</Text>
                 <Text style={[styles.mutedText, { color: colors.muted }]}>{myMood?.mood ?? "Not set"}</Text>
               </View>
               <Ionicons name="pulse-outline" size={20} color={colors.primary} />
@@ -332,17 +469,20 @@ export function SanctuaryScreen() {
           <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <View style={styles.cardHeaderRow}>
               <View>
-                <Text style={[styles.cardTitle, { color: colors.text }]}>Daily snapshot</Text>
-                <Text style={[styles.mutedText, { color: colors.muted }]}>One photo per day, expires in 24h</Text>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>{partnerName}'s snapshot</Text>
+                <Text style={[styles.mutedText, { color: colors.muted }]}>Latest partner photo in the last 24 hours</Text>
               </View>
               <Ionicons name="image-outline" size={20} color={colors.primary} />
             </View>
 
-            {snapshot?.uri ? (
-              <Image source={{ uri: snapshot.uri }} style={styles.snapshot} resizeMode="cover" />
+            {partnerSnapshot?.uri ? (
+              <>
+                <Image source={{ uri: partnerSnapshot.uri }} style={styles.snapshot} resizeMode="cover" />
+                <Text style={[styles.mutedText, { color: colors.muted }]}>Updated {new Date(partnerSnapshot.createdAt).toLocaleTimeString()}</Text>
+              </>
             ) : (
               <View style={[styles.snapshotPlaceholder, { borderColor: colors.border, backgroundColor: colors.surfaceAlt }]}>
-                <Text style={[styles.mutedText, { color: colors.muted }]}>No snapshot uploaded today.</Text>
+                <Text style={[styles.mutedText, { color: colors.muted }]}>{partnerName} has not shared a snapshot yet.</Text>
               </View>
             )}
 
@@ -352,23 +492,10 @@ export function SanctuaryScreen() {
               disabled={savingMood || savingSnapshot}
             >
               <Ionicons name="add" size={18} color="white" />
-              <Text style={styles.primaryButtonText}>{savingSnapshot ? "Saving snapshot..." : "Add / Replace snapshot"}</Text>
+              <Text style={styles.primaryButtonText}>{savingSnapshot ? "Sharing snapshot..." : "Share my snapshot"}</Text>
             </TouchableOpacity>
           </View>
 
-          <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
-            <Text style={[styles.cardTitle, { color: colors.text }]}>Activity Feed</Text>
-            {feed.length === 0 ? (
-              <Text style={[styles.mutedText, { color: colors.muted }]}>No recent activity.</Text>
-            ) : (
-              feed.map(item => (
-                <View key={item.id} style={styles.feedRow}>
-                  <Text style={[styles.mutedText, { color: colors.text, flex: 1 }]}>{item.actorName}: {item.message}</Text>
-                  <Text style={[styles.mutedText, { color: colors.muted }]}>{new Date(item.createdAt).toLocaleTimeString()}</Text>
-                </View>
-              ))
-            )}
-          </View>
         </ScrollView>
       </CoupleModeGate>
     </SafeAreaView>
@@ -496,7 +623,6 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: { color: "white", fontWeight: "700" },
   disabledButton: { opacity: 0.6 },
-  feedRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   secondaryAction: {
     alignSelf: "flex-start",
     borderWidth: 1,

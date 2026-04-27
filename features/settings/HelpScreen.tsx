@@ -60,8 +60,8 @@ export function HelpScreen() {
     if (pending) return;
 
     Alert.alert(
-      "Delete account data",
-      "This permanently deletes your account data and account access. Continue?",
+      "Delete account",
+      "This permanently deletes your account and related data. For security, sign in again if prompted. Continue?",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -83,7 +83,7 @@ export function HelpScreen() {
                       navigation.reset({ index: 0, routes: [{ name: ROUTES.Auth as never }] });
                       Alert.alert("Deleted", "Your account and related data were removed.");
                     } catch (error) {
-                      Alert.alert("Delete failed", getFriendlyFirebaseError(error, "Could not delete account data."));
+                      Alert.alert("Delete failed", getFriendlyFirebaseError(error, "Could not delete account."));
                     } finally {
                       setPending(false);
                     }

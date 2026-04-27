@@ -42,7 +42,7 @@ export function HelpSection({ onClearLocalCache, onSignOut, onDeleteAccountData,
         onPress={onDeleteAccountData}
         disabled={pending}
       >
-        <Text style={[styles.dangerButtonText, { color: colors.danger }]}>Delete account data</Text>
+        <Text style={[styles.dangerButtonText, { color: colors.danger }]}>Delete account</Text>
       </TouchableOpacity>
     </View>
   );

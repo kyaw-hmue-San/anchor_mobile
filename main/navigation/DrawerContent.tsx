@@ -10,7 +10,7 @@ type Props = DrawerContentComponentProps & {
 };
 
 export function DrawerContent(props: Props) {
-  const { session, activeSpaceId, spaceMemberCount } = useSpace();
+  const { session, activeSpaceId, activeSpaceName, spaceMemberCount } = useSpace();
   const { colors, isDark } = useAppTheme();
 
   return (
@@ -19,7 +19,7 @@ export function DrawerContent(props: Props) {
         <Text style={[styles.title, { color: colors.text }]}>Anchor</Text>
         <Text style={[styles.email, { color: colors.muted }]}>{session?.user?.email ?? "Not signed in"}</Text>
         <Text style={[styles.meta, { color: colors.muted }]}>
-          {`Mode: Couple • members: ${spaceMemberCount}${activeSpaceId ? ` • ${activeSpaceId}` : ""}`}
+          {`Mode: Couple • members: ${spaceMemberCount}${activeSpaceName || activeSpaceId ? ` • ${activeSpaceName ?? activeSpaceId}` : ""}`}
         </Text>
       </View>
 

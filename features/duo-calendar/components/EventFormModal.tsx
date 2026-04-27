@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Modal, View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from "react-native";
+import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import { Event } from "../../../models/types";
 import { useAppTheme } from "../../../context/ThemeContext";
@@ -56,6 +57,8 @@ export function EventFormModal({ visible, form, loading, guardianAlertsEnabled, 
   const { colors } = useAppTheme();
   const [dateInput, setDateInput] = useState("");
   const [timeInput, setTimeInput] = useState("");
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
 
   useEffect(() => {
     if (!visible) return;
@@ -73,6 +76,28 @@ export function EventFormModal({ visible, form, loading, guardianAlertsEnabled, 
     setTimeInput(value);
     onChange({ dateTime: buildIsoFromLocal(dateInput, value) });
   };
+
+  const onDatePicked = (event: DateTimePickerEvent, selectedDate?: Date) => {
+    if (Platform.OS === "android") setShowDatePicker(false);
+    if (event.type === "dismissed" || !selectedDate) return;
+
+    const year = selectedDate.getFullYear();
+    const month = `${selectedDate.getMonth() + 1}`.padStart(2, "0");
+    const day = `${selectedDate.getDate()}`.padStart(2, "0");
+    onDateChange(`${year}-${month}-${day}`);
+  };
+
+  const onTimePicked = (event: DateTimePickerEvent, selectedDate?: Date) => {
+    if (Platform.OS === "android") setShowTimePicker(false);
+    if (event.type === "dismissed" || !selectedDate) return;
+
+    const hours = `${selectedDate.getHours()}`.padStart(2, "0");
+    const minutes = `${selectedDate.getMinutes()}`.padStart(2, "0");
+    onTimeChange(`${hours}:${minutes}`);
+  };
+
+  const pickerSeed = buildIsoFromLocal(dateInput, timeInput);
+  const pickerDate = pickerSeed ? new Date(pickerSeed) : new Date();
 
   return (
     <Modal animationType="slide" transparent visible={visible} onRequestClose={onClose}>
@@ -98,25 +123,44 @@ export function EventFormModal({ visible, form, loading, guardianAlertsEnabled, 
             placeholderTextColor={colors.muted}
             editable={!loading}
           />
-          <TextInput
-            placeholder="Date (YYYY-MM-DD)"
-            value={dateInput}
-            onChangeText={onDateChange}
-            style={[styles.input, { borderColor: colors.border, backgroundColor: colors.surface, color: colors.text }]}
-            placeholderTextColor={colors.muted}
-            keyboardType="numbers-and-punctuation"
-            editable={!loading}
-          />
-          <TextInput
-            placeholder="Time (HH:mm)"
-            value={timeInput}
-            onChangeText={onTimeChange}
-            style={[styles.input, { borderColor: colors.border, backgroundColor: colors.surface, color: colors.text }]}
-            placeholderTextColor={colors.muted}
-            keyboardType="numbers-and-punctuation"
-            editable={!loading}
-          />
-          <Text style={[styles.muted, { color: colors.muted }]}>Use local date/time. Example: 2026-03-04 and 18:30</Text>
+
+          <TouchableOpacity
+            style={[styles.pickerButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
+            onPress={() => setShowDatePicker(true)}
+            disabled={loading}
+          >
+            <Text style={[styles.pickerLabel, { color: colors.muted }]}>Event date</Text>
+            <Text style={[styles.pickerValue, { color: colors.text }]}>{dateInput || "Select date"}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.pickerButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
+            onPress={() => setShowTimePicker(true)}
+            disabled={loading}
+          >
+            <Text style={[styles.pickerLabel, { color: colors.muted }]}>Event time</Text>
+            <Text style={[styles.pickerValue, { color: colors.text }]}>{timeInput || "Select time"}</Text>
+          </TouchableOpacity>
+
+          {showDatePicker ? (
+            <DateTimePicker
+              value={pickerDate}
+              mode="date"
+              display={Platform.OS === "ios" ? "spinner" : "default"}
+              onChange={onDatePicked}
+            />
+          ) : null}
+
+          {showTimePicker ? (
+            <DateTimePicker
+              value={pickerDate}
+              mode="time"
+              display={Platform.OS === "ios" ? "spinner" : "default"}
+              onChange={onTimePicked}
+              is24Hour
+            />
+          ) : null}
+
           <TextInput
             placeholder="Note"
             value={form.note}
@@ -180,6 +224,22 @@ const styles = StyleSheet.create({
     minHeight: 44,
     backgroundColor: "#FFF",
     color: "#111827",
+  },
+  pickerButton: {
+    borderWidth: 1,
+    borderRadius: 12,
+    minHeight: 52,
+    paddingHorizontal: 12,
+    justifyContent: "center",
+    gap: 2,
+  },
+  pickerLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  pickerValue: {
+    fontSize: 16,
+    fontWeight: "700",
   },
   toggleButton: {
     flexDirection: "row",

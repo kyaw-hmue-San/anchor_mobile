@@ -16,7 +16,10 @@
       "supportsTablet": true
     },
     "android": {
-      "package": "com.rio2914.anchormobile",
+      "package": "com.rio2914.mobile_anchor",
+      "blockedPermissions": [
+        "android.permission.CAMERA"
+      ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -31,6 +34,10 @@
       "eas": {
         "projectId": "9169fc76-9d57-4c9a-b724-aa75f13ad60f"
       }
-    }
+    },
+    "plugins": [
+      "@react-native-community/datetimepicker",
+      "expo-font"
+    ]
   }
 }

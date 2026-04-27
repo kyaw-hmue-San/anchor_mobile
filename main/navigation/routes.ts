@@ -5,6 +5,7 @@ export const ROUTES = {
   QuickPinUnlock: "QuickPinUnlock",
   ChangeQuickPin: "ChangeQuickPin",
   MainTabs: "MainTabs",
+  SoloTimeline: "SoloTimeline",
   Sanctuary: "Sanctuary",
   DuoCalendar: "DuoCalendar",
   DuoCalendarHome: "DuoCalendarHome",

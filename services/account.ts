@@ -1,11 +1,26 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { deleteUser } from "firebase/auth";
+import { deleteUser, getIdTokenResult } from "firebase/auth";
 import { collection, collectionGroup, deleteDoc, doc, getDocs, query, setDoc, where } from "firebase/firestore";
 import { getFirebaseAuth, getFirebaseDb } from "./firebase";
 import { clearQuickPin } from "./quickPin";
 
 const LOCAL_PREFIX = "anchor:";
 const APP_SETTINGS_KEY = "app_settings";
+const RECENT_LOGIN_MAX_AGE_MS = 5 * 60 * 1000;
+
+async function ensureRecentLoginForSensitiveActions() {
+  const auth = getFirebaseAuth();
+  const currentUser = auth?.currentUser;
+  if (!currentUser) throw new Error("You must be signed in.");
+
+  const tokenResult = await getIdTokenResult(currentUser, true);
+  const authTimeMs = tokenResult.authTime ? new Date(tokenResult.authTime).getTime() : 0;
+  const ageMs = authTimeMs > 0 ? Date.now() - authTimeMs : Number.POSITIVE_INFINITY;
+
+  if (ageMs > RECENT_LOGIN_MAX_AGE_MS) {
+    throw new Error("requires-recent-login: Please sign out and sign in again before deleting your account.");
+  }
+}
 
 async function removeDocsFromCollectionPath(path: string) {
   const db = getFirebaseDb();
@@ -80,6 +95,7 @@ export async function deleteCurrentAccount() {
   const userId = auth?.currentUser?.uid;
   if (!auth?.currentUser || !userId) throw new Error("You must be signed in.");
 
+  await ensureRecentLoginForSensitiveActions();
   await deleteCurrentAccountData();
   await deleteUser(auth.currentUser);
 }

@@ -66,6 +66,34 @@ Current backend status:
 - Profile name persists to Firebase (`services/profile.ts`).
 - App settings persist to Firebase with local cache fallback (`services/appSettings.ts`).
 
+## Snapshot Upload Fallback (Firebase -> Supabase)
+
+Sanctuary snapshot upload now tries Firebase Storage first, then automatically falls back to Supabase Storage if Firebase upload fails.
+
+Add these optional variables to `.env` if you want the fallback:
+
+```bash
+EXPO_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
+EXPO_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
+EXPO_PUBLIC_SUPABASE_STORAGE_BUCKET=snapshots
+EXPO_PUBLIC_SUPABASE_PROFILE_BUCKET=snapshots
+```
+
+Notes:
+
+- The bucket should exist in Supabase Storage.
+- Public URL mode is used for snapshot display, so the bucket should be configured as public.
+
+## Landing Demo Mode
+
+For presentation mode (no auto redirect away from Landing), set:
+
+```bash
+EXPO_PUBLIC_LANDING_DEMO_MODE=true
+```
+
+Then restart Expo.
+
 ## Project Structure
 
 ```text

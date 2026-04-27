@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from "react-native";
+import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import { AnchorLogo } from "../../components/AnchorLogo";
@@ -9,12 +9,16 @@ import { useAppTheme } from "../../context/ThemeContext";
 import { hasQuickPin } from "../../services/quickPin";
 
 const MIN_LANDING_MS = 3000;
+const LANDING_DEMO_MODE = process.env.EXPO_PUBLIC_LANDING_DEMO_MODE === "true";
+const LANDING_AUTO_REDIRECT = process.env.EXPO_PUBLIC_LANDING_AUTO_REDIRECT === "true";
+const FEATURE_PREVIEWS = ["Sanctuary mood sync", "Shared duo calendar", "Guardian alert reminders", "Vault memory timeline"];
 
 export function LandingScreen() {
   const navigation = useNavigation();
   const { loading, session, startupIssue, retrySessionBootstrap } = useSpace();
   const { colors } = useAppTheme();
   const [pinStatusLoading, setPinStatusLoading] = useState(false);
+  const [nextRoute, setNextRoute] = useState<string | null>(null);
 
   useEffect(() => {
     if (loading) return;
@@ -23,6 +27,8 @@ export function LandingScreen() {
     let mounted = true;
     const routeNext = async () => {
       const startedAt = Date.now();
+      let targetRoute: string = ROUTES.Auth;
+
       const ensureMinimumLandingTime = async () => {
         const elapsed = Date.now() - startedAt;
         const remaining = Math.max(0, MIN_LANDING_MS - elapsed);
@@ -31,24 +37,37 @@ export function LandingScreen() {
         }
       };
 
-      if (!session?.user?.id) {
+      try {
+        if (!session?.user?.id) {
+          targetRoute = ROUTES.Auth;
+        } else {
+          setPinStatusLoading(true);
+          const hasPin = await hasQuickPin(session.user.id);
+          targetRoute = hasPin ? ROUTES.QuickPinUnlock : ROUTES.QuickPinSetup;
+        }
+
         await ensureMinimumLandingTime();
         if (!mounted) return;
-        navigation.reset({ index: 0, routes: [{ name: ROUTES.Auth as never }] });
-        return;
+        setNextRoute(targetRoute);
+
+        if (LANDING_AUTO_REDIRECT && !LANDING_DEMO_MODE) {
+          navigation.reset({ index: 0, routes: [{ name: targetRoute as never }] });
+        }
+      } catch {
+        await ensureMinimumLandingTime();
+        if (!mounted) return;
+        setNextRoute(ROUTES.Auth);
+        if (LANDING_AUTO_REDIRECT && !LANDING_DEMO_MODE) {
+          navigation.reset({ index: 0, routes: [{ name: ROUTES.Auth as never }] });
+        }
+      } finally {
+        if (mounted) {
+          setPinStatusLoading(false);
+        }
       }
-
-      setPinStatusLoading(true);
-      const hasPin = await hasQuickPin(session.user.id);
-      await ensureMinimumLandingTime();
-      if (!mounted) return;
-
-      const nextRoute = hasPin ? ROUTES.QuickPinUnlock : ROUTES.QuickPinSetup;
-      navigation.reset({ index: 0, routes: [{ name: nextRoute as never }] });
-      setPinStatusLoading(false);
     };
 
-    routeNext();
+    void routeNext();
 
     return () => {
       mounted = false;
@@ -58,32 +77,70 @@ export function LandingScreen() {
   const statusText = useMemo(() => {
     if (loading) return "Checking app data and your account…";
     if (startupIssue) return startupIssue;
+    if (LANDING_DEMO_MODE && nextRoute) return "Presentation mode is enabled. Use Continue to open the app when you are ready.";
+    if (!LANDING_AUTO_REDIRECT && nextRoute) return "Ready when you are. Tap Get Started to continue.";
     if (pinStatusLoading) return "Preparing secure quick login…";
     if (session) return "Signed in. Redirecting now…";
     return "Welcome. Redirecting to sign in…";
-  }, [loading, pinStatusLoading, session, startupIssue]);
+  }, [loading, nextRoute, pinStatusLoading, session, startupIssue]);
+
+  const goNext = () => {
+    const target = nextRoute || ROUTES.Auth;
+    navigation.reset({ index: 0, routes: [{ name: target as never }] });
+  };
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={["top", "left", "right"]}>
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <View style={styles.hero}>
-          <AnchorLogo size={84} />
-          <Text style={[styles.title, { color: colors.text }]}>Anchor</Text>
-          <Text style={[styles.subtitle, { color: colors.muted }]}>A private sanctuary for two hearts.</Text>
-        </View>
+        <View style={[styles.bgOrbTop, { backgroundColor: colors.primarySoft }]} />
+        <View style={[styles.bgOrbBottom, { borderColor: colors.border }]} />
 
-        <View style={[styles.statusCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <View style={styles.statusRow}>
-            {loading || pinStatusLoading ? <ActivityIndicator size="small" color={colors.primary} /> : <View style={styles.statusDot} />}
-            <Text style={[styles.statusTitle, { color: colors.text }]}>App status</Text>
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <View style={styles.hero}>
+            <AnchorLogo size={84} />
+            <Text style={[styles.title, { color: colors.text }]}>Anchor</Text>
+            <Text style={[styles.subtitle, { color: colors.muted }]}>A private sanctuary for two hearts.</Text>
           </View>
-          <Text style={[styles.statusText, { color: colors.muted }]}>{statusText}</Text>
-          {startupIssue ? (
-            <TouchableOpacity style={[styles.retryButton, { backgroundColor: colors.primary }]} onPress={retrySessionBootstrap}>
-              <Text style={styles.retryButtonText}>Retry startup</Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
+
+          <View style={[styles.featureCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.featureTitle, { color: colors.text }]}>Live Demo Features</Text>
+            <View style={styles.featureGrid}>
+              {FEATURE_PREVIEWS.map(item => (
+                <View key={item} style={[styles.featureChip, { backgroundColor: colors.surfaceAlt, borderColor: colors.border }]}>
+                  <Text style={[styles.featureChipText, { color: colors.text }]}>{item}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+
+          <View style={[styles.statusCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={styles.statusRow}>
+              {loading || pinStatusLoading ? <ActivityIndicator size="small" color={colors.primary} /> : <View style={styles.statusDot} />}
+              <Text style={[styles.statusTitle, { color: colors.text }]}>App status</Text>
+            </View>
+            <Text style={[styles.statusText, { color: colors.muted }]}>{statusText}</Text>
+            {startupIssue ? (
+              <TouchableOpacity style={[styles.retryButton, { backgroundColor: colors.primary }]} onPress={retrySessionBootstrap}>
+                <Text style={styles.retryButtonText}>Retry startup</Text>
+              </TouchableOpacity>
+            ) : null}
+            {(!loading && !startupIssue && nextRoute) ? (
+              <View style={styles.ctaRow}>
+                <TouchableOpacity style={[styles.primaryAction, { backgroundColor: colors.primary }]} onPress={goNext}>
+                  <Text style={styles.primaryActionText}>Get Started</Text>
+                </TouchableOpacity>
+                {LANDING_DEMO_MODE ? (
+                  <TouchableOpacity
+                    style={[styles.secondaryAction, { borderColor: colors.border, backgroundColor: colors.surfaceAlt }]}
+                    onPress={() => navigation.reset({ index: 0, routes: [{ name: ROUTES.Auth as never }] })}
+                  >
+                    <Text style={[styles.secondaryActionText, { color: colors.text }]}>Open sign in</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            ) : null}
+          </View>
+        </ScrollView>
       </View>
     </SafeAreaView>
   );
@@ -93,12 +150,35 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: "#F5F3FF" },
   container: {
     flex: 1,
+    position: "relative",
     backgroundColor: "#F5F3FF",
+  },
+  scrollContent: {
     padding: 24,
-    justifyContent: "space-between",
+    gap: 16,
+    paddingBottom: 30,
+  },
+  bgOrbTop: {
+    position: "absolute",
+    top: -80,
+    right: -40,
+    width: 220,
+    height: 220,
+    borderRadius: 999,
+    opacity: 0.45,
+  },
+  bgOrbBottom: {
+    position: "absolute",
+    bottom: -120,
+    left: -40,
+    width: 260,
+    height: 260,
+    borderRadius: 999,
+    borderWidth: 20,
+    opacity: 0.25,
   },
   hero: {
-    marginTop: 40,
+    marginTop: 24,
     alignItems: "center",
     gap: 10,
   },
@@ -111,6 +191,33 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#6B7280",
     textAlign: "center",
+  },
+  featureCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 16,
+    gap: 12,
+  },
+  featureTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    letterSpacing: 0.2,
+  },
+  featureGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  featureChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    minHeight: 34,
+    justifyContent: "center",
+  },
+  featureChipText: {
+    fontSize: 13,
+    fontWeight: "600",
   },
   statusCard: {
     backgroundColor: "#FFFFFF",
@@ -150,5 +257,29 @@ const styles = StyleSheet.create({
   retryButtonText: {
     color: "white",
     fontWeight: "700",
+  },
+  ctaRow: {
+    marginTop: 8,
+    gap: 8,
+  },
+  primaryAction: {
+    borderRadius: 12,
+    minHeight: 42,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  primaryActionText: {
+    color: "white",
+    fontWeight: "700",
+  },
+  secondaryAction: {
+    borderRadius: 12,
+    minHeight: 42,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+  },
+  secondaryActionText: {
+    fontWeight: "600",
   },
 });

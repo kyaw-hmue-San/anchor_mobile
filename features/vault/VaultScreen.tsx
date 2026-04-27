@@ -5,8 +5,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { AnchorLogo } from "../../components/AnchorLogo";
 import { MenuButton } from "../../components/MenuButton";
 import { ConnectionStatusBanner } from "../../components/ConnectionStatusBanner";
-import { Memory, MemoryTag, Snapshot } from "../../models/types";
-import { addMemoryFromSnapshot, addNoteMemory, getTodaySnapshot, listMemories } from "../../services/storage";
+import { Memory, MemoryTag } from "../../models/types";
+import { addNoteMemory, listMemories } from "../../services/storage";
 import { useAppTheme } from "../../context/ThemeContext";
 import { getFriendlyFirebaseError } from "../../services/firebaseErrors";
 import { CoupleModeGate } from "../../components/CoupleModeGate";
@@ -18,20 +18,17 @@ export function VaultScreen() {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [noteTitle, setNoteTitle] = useState("");
   const [noteDesc, setNoteDesc] = useState("");
-  const [todaySnap, setTodaySnap] = useState<Snapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [savingNote, setSavingNote] = useState(false);
-  const [savingSnapshot, setSavingSnapshot] = useState(false);
   const [activeTag, setActiveTag] = useState<MemoryTag | "all">("all");
   const [draftTag, setDraftTag] = useState<MemoryTag>("anniversary");
 
   const load = async () => {
     setError(null);
     try {
-      const [mems, snap] = await Promise.all([listMemories(), getTodaySnapshot()]);
+      const mems = await listMemories();
       setMemories(mems);
-      setTodaySnap(snap);
     } catch (error) {
       setError(getFriendlyFirebaseError(error, "Could not load Vault data."));
     }
@@ -47,28 +44,8 @@ export function VaultScreen() {
     setInitialLoading(false);
   }, []);
 
-  const addSnapshotMemory = async () => {
-    if (savingNote || savingSnapshot) return;
-
-    if (!todaySnap) {
-      setError("No snapshot found for today. Add one in Sanctuary first.");
-      return;
-    }
-
-    setError(null);
-    setSavingSnapshot(true);
-    try {
-      await addMemoryFromSnapshot(todaySnap);
-      await load();
-    } catch (error) {
-      setError(getFriendlyFirebaseError(error, "Could not save snapshot to Vault."));
-    } finally {
-      setSavingSnapshot(false);
-    }
-  };
-
   const addNote = async () => {
-    if (savingNote || savingSnapshot) return;
+    if (savingNote) return;
     if (!noteTitle.trim()) return;
 
     setError(null);
@@ -144,7 +121,7 @@ export function VaultScreen() {
               onChangeText={setNoteTitle}
               style={[styles.input, { borderColor: colors.border, backgroundColor: colors.surface, color: colors.text }]}
               placeholderTextColor={colors.muted}
-              editable={!savingNote && !savingSnapshot}
+              editable={!savingNote}
             />
             <TextInput
               placeholder="Description"
@@ -153,7 +130,7 @@ export function VaultScreen() {
               style={[styles.input, { minHeight: 90, borderColor: colors.border, backgroundColor: colors.surface, color: colors.text }]}
               placeholderTextColor={colors.muted}
               multiline
-              editable={!savingNote && !savingSnapshot}
+              editable={!savingNote}
             />
             <View style={styles.tagRow}>
               {memoryTags.map(tag => (
@@ -165,39 +142,18 @@ export function VaultScreen() {
                     draftTag === tag && { borderColor: colors.primary, backgroundColor: colors.primarySoft },
                   ]}
                   onPress={() => setDraftTag(tag)}
-                  disabled={savingNote || savingSnapshot}
+                  disabled={savingNote}
                 >
                   <Text style={[styles.muted, { color: draftTag === tag ? colors.primary : colors.text }]}>{tag}</Text>
                 </TouchableOpacity>
               ))}
             </View>
             <TouchableOpacity
-              style={[styles.primaryButton, { backgroundColor: colors.primary }, (savingNote || savingSnapshot) && styles.disabledButton]}
+              style={[styles.primaryButton, { backgroundColor: colors.primary }, savingNote && styles.disabledButton]}
               onPress={addNote}
-              disabled={savingNote || savingSnapshot}
+              disabled={savingNote}
             >
               <Text style={styles.primaryButtonText}>{savingNote ? "Saving note..." : "Save note to Vault"}</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <View style={styles.cardHeaderRow}>
-              <Text style={[styles.cardTitle, { color: colors.text }]}>Today’s snapshot</Text>
-              <Ionicons name="image-outline" size={20} color={colors.primary} />
-            </View>
-            {todaySnap?.uri ? (
-              <Image source={{ uri: todaySnap.uri }} style={styles.snapshot} resizeMode="cover" />
-            ) : (
-              <View style={[styles.emptySnapshot, { borderColor: colors.border, backgroundColor: colors.surfaceAlt }]}>
-                <Text style={[styles.muted, { color: colors.muted }]}>No snapshot for today yet.</Text>
-              </View>
-            )}
-            <TouchableOpacity
-              style={[styles.primaryButton, { backgroundColor: colors.primary }, (savingNote || savingSnapshot) && styles.disabledButton]}
-              onPress={addSnapshotMemory}
-              disabled={savingNote || savingSnapshot}
-            >
-              <Text style={styles.primaryButtonText}>{savingSnapshot ? "Saving snapshot..." : "Save snapshot to Vault"}</Text>
             </TouchableOpacity>
           </View>
 

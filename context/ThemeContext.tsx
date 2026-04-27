@@ -68,10 +68,16 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const setDarkModeEnabled = useCallback(async (enabled: boolean) => {
+    const previousMode = mode;
     setMode(enabled ? "dark" : "light");
-    const current = await getAppSettings();
-    await saveAppSettings({ ...current, darkMode: enabled });
-  }, []);
+    try {
+      const current = await getAppSettings();
+      await saveAppSettings({ ...current, darkMode: enabled });
+    } catch (error) {
+      setMode(previousMode);
+      throw error;
+    }
+  }, [mode]);
 
   const toggleThemeMode = useCallback(async () => {
     const nextDark = mode !== "dark";

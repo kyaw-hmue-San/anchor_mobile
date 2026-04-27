@@ -59,15 +59,20 @@ export async function getAppSettings(): Promise<AppSettings> {
   const localSettings = toSettingsFromPartial(safeParseSettings(localRaw));
 
   if (db && userId && localRaw) {
-    await setDoc(
-      doc(db, "users", userId, "private", APP_SETTINGS_DOC_ID),
-      {
-        ...localSettings,
-        updatedAt: Date.now(),
-        serverUpdatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    );
+    try {
+      await setDoc(
+        doc(db, "users", userId, "private", APP_SETTINGS_DOC_ID),
+        {
+          ...localSettings,
+          updatedAt: Date.now(),
+          serverUpdatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+    } catch (error) {
+      // Keep local settings usable even when remote sync is temporarily unavailable.
+      console.warn("Could not sync app settings to Firestore:", error);
+    }
   }
 
   return localSettings;

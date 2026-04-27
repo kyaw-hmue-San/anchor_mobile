@@ -12,7 +12,10 @@ function notificationStoreKey(eventId: string) {
 
 async function hasNotificationPermission() {
   const perms = await Notifications.getPermissionsAsync();
-  return perms.granted || perms.status === "granted";
+  if (perms.granted || perms.status === "granted") return true;
+
+  const requested = await Notifications.requestPermissionsAsync();
+  return requested.granted || requested.status === "granted";
 }
 
 async function ensureAndroidChannel() {

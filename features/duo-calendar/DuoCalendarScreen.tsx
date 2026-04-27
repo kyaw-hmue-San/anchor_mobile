@@ -15,6 +15,7 @@ import {
   listEvents,
   listSmartReminders,
   saveEvent,
+  subscribeToEvents,
   updateGoalProgress,
   upsertCoupleGoal,
 } from "../../services/storage";
@@ -108,7 +109,35 @@ export function DuoCalendarScreen() {
     };
 
     init();
-  }, []);
+  }, [loadEvents]);
+
+  useEffect(() => {
+    let unsubscribe: (() => void) | null = null;
+    let active = true;
+
+    const start = async () => {
+      try {
+        unsubscribe = await subscribeToEvents(
+          () => {
+            if (!active) return;
+            void loadEvents({ showSpinner: false });
+          },
+          () => {
+            // Keep current data on transient listener failures.
+          }
+        );
+      } catch {
+        // Initial/manual loading still works even if listener setup fails.
+      }
+    };
+
+    void start();
+
+    return () => {
+      active = false;
+      unsubscribe?.();
+    };
+  }, [loadEvents]);
 
   const onSave = useCallback(async () => {
     if (!form.title.trim()) {
