@@ -254,6 +254,9 @@ export function DuoCalendarScreen() {
             navigation.navigate(ROUTES.GuardianAlert as never);
           }}
           disabled={loading}
+          accessibilityRole="button"
+          accessibilityLabel="Open Guardian Alert"
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
         >
           <Ionicons name="alert" size={22} color="white" />
           <Text style={styles.alertBannerText}>Guardian Alert</Text>
@@ -274,6 +277,9 @@ export function DuoCalendarScreen() {
               setShowModal(true);
             }}
             disabled={loading}
+            accessibilityRole="button"
+            accessibilityLabel="Add event"
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
             <Ionicons name="add" size={20} color="white" />
           </TouchableOpacity>

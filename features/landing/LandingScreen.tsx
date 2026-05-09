@@ -120,13 +120,25 @@ export function LandingScreen() {
             </View>
             <Text style={[styles.statusText, { color: colors.muted }]}>{statusText}</Text>
             {startupIssue ? (
-              <TouchableOpacity style={[styles.retryButton, { backgroundColor: colors.primary }]} onPress={retrySessionBootstrap}>
+              <TouchableOpacity
+                style={[styles.retryButton, { backgroundColor: colors.primary }]}
+                onPress={retrySessionBootstrap}
+                accessibilityRole="button"
+                accessibilityLabel="Retry startup"
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              >
                 <Text style={styles.retryButtonText}>Retry startup</Text>
               </TouchableOpacity>
             ) : null}
             {(!loading && !startupIssue && nextRoute) ? (
               <View style={styles.ctaRow}>
-                <TouchableOpacity style={[styles.primaryAction, { backgroundColor: colors.primary }]} onPress={goNext}>
+                <TouchableOpacity
+                  style={[styles.primaryAction, { backgroundColor: colors.primary }]}
+                  onPress={goNext}
+                  accessibilityRole="button"
+                  accessibilityLabel="Get Started"
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                >
                   <Text style={styles.primaryActionText}>Get Started</Text>
                 </TouchableOpacity>
                 {LANDING_DEMO_MODE ? (
